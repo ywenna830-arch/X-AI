@@ -38,9 +38,13 @@ def init_db(app):
                 priority TEXT NOT NULL DEFAULT '中',
                 status TEXT NOT NULL DEFAULT '未开始',
                 submission_requirements TEXT NOT NULL DEFAULT '',
+                required_materials TEXT NOT NULL DEFAULT '',
+                suggested_materials TEXT NOT NULL DEFAULT '',
                 source_type TEXT NOT NULL DEFAULT '手动填写',
                 source_text TEXT NOT NULL DEFAULT '',
+                source_quote TEXT NOT NULL DEFAULT '',
                 confidence TEXT NOT NULL DEFAULT '人工录入',
+                uncertain_fields TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 CHECK (estimated_minutes >= 0),
@@ -49,6 +53,7 @@ def init_db(app):
             )
             """
         )
+        _ensure_task_columns(db)
         db.commit()
 
 
@@ -93,9 +98,13 @@ def validate_task_form(form):
         "priority": priority,
         "status": status,
         "submission_requirements": form.get("submission_requirements", "").strip(),
+        "required_materials": form.get("required_materials", "").strip(),
+        "suggested_materials": form.get("suggested_materials", "").strip(),
         "source_type": form.get("source_type", "手动填写").strip() or "手动填写",
         "source_text": form.get("source_text", "").strip(),
+        "source_quote": form.get("source_quote", "").strip(),
         "confidence": form.get("confidence", "人工录入").strip() or "人工录入",
+        "uncertain_fields": form.get("uncertain_fields", "").strip(),
     }
     return errors, data
 
@@ -108,9 +117,10 @@ def create_task(data):
         INSERT INTO tasks (
             course_name, title, task_type, description, deadline,
             estimated_minutes, priority, status, submission_requirements,
-            source_type, source_text, confidence, created_at, updated_at
+            required_materials, suggested_materials, source_type, source_text,
+            source_quote, confidence, uncertain_fields, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             data["course_name"],
@@ -122,9 +132,13 @@ def create_task(data):
             data["priority"],
             data["status"],
             data["submission_requirements"],
+            data["required_materials"],
+            data["suggested_materials"],
             data["source_type"],
             data["source_text"],
+            data["source_quote"],
             data["confidence"],
+            data["uncertain_fields"],
             now,
             now,
         ),
@@ -140,8 +154,9 @@ def update_task(task_id, data):
         UPDATE tasks
         SET course_name = ?, title = ?, task_type = ?, description = ?,
             deadline = ?, estimated_minutes = ?, priority = ?, status = ?,
-            submission_requirements = ?, source_type = ?, source_text = ?,
-            confidence = ?, updated_at = ?
+            submission_requirements = ?, required_materials = ?,
+            suggested_materials = ?, source_type = ?, source_text = ?,
+            source_quote = ?, confidence = ?, uncertain_fields = ?, updated_at = ?
         WHERE id = ?
         """,
         (
@@ -154,9 +169,13 @@ def update_task(task_id, data):
             data["priority"],
             data["status"],
             data["submission_requirements"],
+            data["required_materials"],
+            data["suggested_materials"],
             data["source_type"],
             data["source_text"],
+            data["source_quote"],
             data["confidence"],
+            data["uncertain_fields"],
             _now(),
             task_id,
         ),
@@ -302,3 +321,18 @@ def format_deadline(value):
 
 def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _ensure_task_columns(db):
+    existing_columns = {
+        row["name"] for row in db.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    columns = {
+        "required_materials": "TEXT NOT NULL DEFAULT ''",
+        "suggested_materials": "TEXT NOT NULL DEFAULT ''",
+        "source_quote": "TEXT NOT NULL DEFAULT ''",
+        "uncertain_fields": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in columns.items():
+        if name not in existing_columns:
+            db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")

@@ -8,30 +8,38 @@
     <article class="panel assistant-panel">
         <div class="section-heading">
             <h2>对话式录入</h2>
-            <span class="status-tag is-muted">AI识别暂未接入</span>
+            <span class="status-tag is-good">文字解析已接入</span>
         </div>
 
         <div class="chat-window" aria-label="对话消息区域">
             <div class="chat-message is-ai">
                 <div class="chat-avatar" aria-hidden="true">AI</div>
                 <div class="chat-bubble">
-                    <p>把老师的通知、截图或文档发给我，我会帮你整理成任务。</p>
-                    <small>当前阶段仅完成录入界面重构，文字识别将在阶段3接入。</small>
+                    <p>把老师的文字通知粘贴给我，我会整理成待确认的任务卡片。</p>
+                    <small>当前阶段只支持文字通知；图片、Word和PDF将在后续阶段接入。</small>
                 </div>
             </div>
 
             <div class="structured-note">
-                <strong>结构化确认思路</strong>
+                <strong>确认后再保存</strong>
                 <ol>
-                    <li>识别课程、任务名称、截止时间和提交要求。</li>
-                    <li>展示待确认结果，由你修改或补充。</li>
-                    <li>确认后再保存为正式任务。</li>
+                    <li>识别课程、任务名称、截止时间、提交要求和材料。</li>
+                    <li>标出原文明确、AI推断和信息缺失的字段。</li>
+                    <li>进入确认页，由你修改后再保存为正式任务。</li>
                 </ol>
-                <p>AI识别暂未接入，本页不会自动解析或保存对话内容。</p>
+                <p>AI解析结果不会直接写入数据库。</p>
             </div>
         </div>
 
-        <div class="chat-composer" aria-label="对话输入区域">
+        {% if parse_errors %}
+            <ul class="error-list">
+                {% for error in parse_errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+        <form class="chat-composer" method="post" action="{{ url_for('main.parse_text_notice_route') }}" aria-label="对话输入区域">
             <details class="attachment-picker">
                 <summary aria-label="打开附件入口">+</summary>
                 <div class="attachment-menu">
@@ -54,10 +62,12 @@
             </details>
 
             <label class="sr-only" for="conversation-input">课程通知内容</label>
-            <textarea id="conversation-input" rows="2" placeholder="粘贴老师通知，阶段3接入AI识别。" aria-describedby="ai-entry-status"></textarea>
-            <button class="button is-disabled" type="button" disabled>阶段3接入</button>
-        </div>
-        <p class="muted-text composer-note" id="ai-entry-status">AI识别暂未接入，发送按钮暂不可用。</p>
+            <textarea id="conversation-input" name="notice_text" rows="3" placeholder="粘贴老师通知文字。" aria-describedby="ai-entry-status" required>{{ notice_text or '' }}</textarea>
+            <button class="button" type="submit">解析文字</button>
+            <label class="sr-only" for="notice-date">通知日期</label>
+            <input id="notice-date" name="notice_date" type="date" value="{{ notice_date or '' }}" aria-label="通知日期">
+        </form>
+        <p class="muted-text composer-note" id="ai-entry-status">如果通知里有“下周三”等相对时间，请填写通知日期；未配置API密钥时会启用本地演示解析模式。</p>
     </article>
 
     <details class="panel manual-entry-panel" {% if errors %}open{% endif %}>

@@ -416,6 +416,10 @@ h3 {
     gap: 10px;
 }
 
+.chat-composer input[type="date"] {
+    grid-column: 2 / 3;
+}
+
 .attachment-picker {
     position: relative;
 }

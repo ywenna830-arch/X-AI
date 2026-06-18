@@ -17,13 +17,18 @@
         <div><small>预计用时</small><strong>{{ task.estimated_minutes }} 分钟</strong></div>
         <div><small>优先级</small><strong>{{ task.priority }}</strong></div>
         <div><small>提交要求</small><strong>{{ task.submission_requirements or "未填写" }}</strong></div>
+        <div><small>必需材料</small><strong>{{ task.required_materials or "未填写" }}</strong></div>
+        <div><small>建议材料</small><strong>{{ task.suggested_materials or "未填写" }}</strong></div>
         <div><small>来源</small><strong>{{ task.source_type }}</strong></div>
         <div><small>可信状态</small><strong>{{ task.confidence }}</strong></div>
+        <div><small>需确认字段</small><strong>{{ task.uncertain_fields or "无" }}</strong></div>
         <div><small>更新时间</small><strong>{{ task.updated_at }}</strong></div>
     </div>
     <article class="task-description">
         <h3>任务说明</h3>
         <p>{{ task.description or "暂无说明。" }}</p>
+        <h3>来源引用</h3>
+        <p>{{ task.source_quote or "暂无来源引用。" }}</p>
         <h3>来源原文</h3>
         <p>{{ task.source_text or "暂无来源原文。" }}</p>
     </article>

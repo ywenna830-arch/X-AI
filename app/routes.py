@@ -1,5 +1,6 @@
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
+from .ai_parser import AIParseError, parse_text_notice
 from .tasks import (
     ALLOWED_PRIORITIES,
     ALLOWED_STATUSES,
@@ -33,6 +34,7 @@ def add_task():
         "add_task.html",
         active_page="add_task",
         errors=[],
+        parse_errors=[],
         form_data={},
         statuses=ALLOWED_STATUSES,
         priorities=ALLOWED_PRIORITIES,
@@ -48,6 +50,7 @@ def create_task_route():
                 "add_task.html",
                 active_page="add_task",
                 errors=errors,
+                parse_errors=[],
                 form_data=data,
                 statuses=ALLOWED_STATUSES,
                 priorities=ALLOWED_PRIORITIES,
@@ -60,9 +63,52 @@ def create_task_route():
     return redirect(url_for("main.task_detail", task_id=task_id))
 
 
+@main_bp.post("/tasks/ai/parse")
+def parse_text_notice_route():
+    notice_text = request.form.get("notice_text", "")
+    notice_date = request.form.get("notice_date", "")
+    try:
+        result = parse_text_notice(notice_text, notice_date)
+    except AIParseError as exc:
+        return (
+            render_template(
+                "add_task.html",
+                active_page="add_task",
+                errors=[],
+                parse_errors=[exc.message],
+                notice_text=notice_text,
+                notice_date=notice_date,
+                form_data={},
+                statuses=ALLOWED_STATUSES,
+                priorities=ALLOWED_PRIORITIES,
+            ),
+            400,
+        )
+
+    form_data = result["data"]
+    form_data["source_text"] = notice_text.strip()
+    return render_template(
+        "ai_confirm.html",
+        active_page="ai_confirm",
+        result=result,
+        errors=[],
+        form_data=form_data,
+        statuses=ALLOWED_STATUSES,
+        priorities=ALLOWED_PRIORITIES,
+    )
+
+
 @main_bp.get("/tasks/confirm")
 def ai_confirm():
-    return render_template("ai_confirm.html", active_page="ai_confirm")
+    return render_template(
+        "ai_confirm.html",
+        active_page="ai_confirm",
+        result=None,
+        errors=[],
+        form_data={},
+        statuses=ALLOWED_STATUSES,
+        priorities=ALLOWED_PRIORITIES,
+    )
 
 
 @main_bp.get("/tasks")

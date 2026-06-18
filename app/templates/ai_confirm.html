@@ -4,15 +4,64 @@
 {% block page_title %}AI识别确认{% endblock %}
 
 {% block content %}
-<section class="panel">
-    <div class="section-heading">
-        <h2>待确认任务草稿</h2>
-        <span class="status-tag is-muted">暂未接入AI</span>
-    </div>
-    <div class="empty-state">AI识别将在阶段3接入。当前可通过“添加任务”手动新增真实任务。</div>
-    <div class="button-row">
-        <button class="button is-disabled" type="button" disabled>确认并保存 · 暂未接入</button>
-        <button class="button secondary is-disabled" type="button" disabled>返回修改 · 暂未接入</button>
-    </div>
-</section>
+{% if result %}
+    <section class="entry-layout">
+        <article class="panel">
+            <div class="section-heading">
+                <h2>AI简短回复</h2>
+                <span class="status-tag {{ 'is-warning' if result.mode == 'demo' else 'is-good' }}">{{ "本地演示解析" if result.mode == "demo" else "AI解析" }}</span>
+            </div>
+            <div class="chat-message is-ai">
+                <div class="chat-avatar" aria-hidden="true">AI</div>
+                <div class="chat-bubble">
+                    <p>{{ result.reply }}</p>
+                    <small>请确认所有字段；确认前不会保存任务。</small>
+                </div>
+            </div>
+        </article>
+
+        <article class="panel">
+            <div class="section-heading">
+                <h2>结构化任务卡片</h2>
+                <span class="status-tag is-info">{{ form_data.confidence }}</span>
+            </div>
+            <div class="detail-grid">
+                <div><small>课程名称</small><strong>{{ form_data.course_name or "需要确认" }}</strong></div>
+                <div><small>任务名称</small><strong>{{ form_data.title or "需要确认" }}</strong></div>
+                <div><small>作业类型</small><strong>{{ form_data.task_type or "需要确认" }}</strong></div>
+                <div><small>截止时间</small><strong>{{ form_data.deadline or "需要确认" }}</strong></div>
+                <div><small>预计用时</small><strong>{{ form_data.estimated_minutes }} 分钟</strong></div>
+                <div><small>优先级</small><strong>{{ form_data.priority }}</strong></div>
+            </div>
+            {% if form_data.uncertain_fields %}
+                <p class="page-note">需要重点确认：{{ form_data.uncertain_fields }}</p>
+            {% endif %}
+        </article>
+
+        <article class="panel">
+            <div class="section-heading">
+                <h2>确认并修改</h2>
+                <span class="status-tag is-muted">待保存</span>
+            </div>
+            <form class="task-form" method="post" action="{{ url_for('main.create_task_route') }}">
+                {% include "_task_form.html" %}
+                <div class="button-row">
+                    <button class="button" type="submit">确认并保存</button>
+                    <a class="button secondary" href="{{ url_for('main.add_task') }}">返回修改原文</a>
+                </div>
+            </form>
+        </article>
+    </section>
+{% else %}
+    <section class="panel">
+        <div class="section-heading">
+            <h2>待确认任务草稿</h2>
+            <span class="status-tag is-muted">暂无草稿</span>
+        </div>
+        <div class="empty-state">请先在“添加任务”页粘贴文字通知并解析。</div>
+        <div class="button-row">
+            <a class="button" href="{{ url_for('main.add_task') }}">去添加任务</a>
+        </div>
+    </section>
+{% endif %}
 {% endblock %}

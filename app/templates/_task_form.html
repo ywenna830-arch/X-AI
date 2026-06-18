@@ -47,12 +47,31 @@
     <input id="submission-requirements" name="submission_requirements" type="text" value="{{ form_data.submission_requirements or '' }}" placeholder="PDF格式，上传课程平台">
 </div>
 <div class="field-pair">
+    <label for="required-materials">必需材料</label>
+    <textarea id="required-materials" name="required_materials" rows="3" placeholder="每行一项">{{ form_data.required_materials or '' }}</textarea>
+</div>
+<div class="field-pair">
+    <label for="suggested-materials">建议材料</label>
+    <textarea id="suggested-materials" name="suggested_materials" rows="3" placeholder="每行一项">{{ form_data.suggested_materials or '' }}</textarea>
+</div>
+<div class="field-pair">
     <label for="description">任务说明</label>
     <textarea id="description" name="description" rows="4" placeholder="补充说明">{{ form_data.description or '' }}</textarea>
+</div>
+<div class="field-pair">
+    <label for="source-quote">来源引用</label>
+    <textarea id="source-quote" name="source_quote" rows="3" placeholder="AI提取依据或关键原文">{{ form_data.source_quote or '' }}</textarea>
 </div>
 <div class="field-pair">
     <label for="source-text">来源原文</label>
     <textarea id="source-text" name="source_text" rows="4" placeholder="手动粘贴原始通知">{{ form_data.source_text or '' }}</textarea>
 </div>
+<div class="field-pair">
+    <label for="uncertain-fields">需要确认的字段</label>
+    <textarea id="uncertain-fields" name="uncertain_fields" rows="3" placeholder="例如：deadline">{{ form_data.uncertain_fields or '' }}</textarea>
+</div>
+<div class="field-pair">
+    <label for="confidence">解析可信状态</label>
+    <input id="confidence" name="confidence" type="text" value="{{ form_data.confidence or '人工录入' }}" placeholder="原文明确 / AI推断 / 信息缺失">
+</div>
 <input type="hidden" name="source_type" value="{{ form_data.source_type or '手动填写' }}">
-<input type="hidden" name="confidence" value="{{ form_data.confidence or '人工录入' }}">

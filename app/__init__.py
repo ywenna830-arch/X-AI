@@ -14,6 +14,11 @@ def create_app(test_config=None):
             "DATABASE_PATH",
             os.path.join(app.instance_path, "tasks.sqlite3"),
         ),
+        AI_API_KEY=os.getenv("AI_API_KEY", ""),
+        AI_API_BASE_URL=os.getenv("AI_API_BASE_URL", ""),
+        AI_MODEL=os.getenv("AI_MODEL", ""),
+        AI_TIMEOUT=int(os.getenv("AI_TIMEOUT", "20")),
+        AI_DEMO_MODE=os.getenv("AI_DEMO_MODE", "0") == "1",
     )
     if test_config:
         app.config.update(test_config)
