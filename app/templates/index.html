@@ -8,61 +8,72 @@
     <article class="panel panel-strong">
         <div class="section-heading">
             <h2>今日任务</h2>
-            <span class="status-tag is-info">示例数据</span>
+            <span class="status-tag is-info">{{ dashboard.today_tasks|length }}项</span>
         </div>
-        <ul class="task-list">
-            <li>
-                <span>
-                    <strong>高等数学习题整理</strong>
-                    <small>预计 90 分钟 · 进行中</small>
-                </span>
-                <span class="status-tag is-progress">进行中</span>
-            </li>
-            <li>
-                <span>
-                    <strong>英语阅读报告提纲</strong>
-                    <small>预计 45 分钟 · 未开始</small>
-                </span>
-                <span class="status-tag">未开始</span>
-            </li>
-        </ul>
+        {% if dashboard.today_tasks %}
+            <ul class="task-list">
+                {% for task in dashboard.today_tasks %}
+                    <li>
+                        <span>
+                            <a class="text-link" href="{{ url_for('main.task_detail', task_id=task.id) }}"><strong>{{ task.title }}</strong></a>
+                            <small>{{ task.course_name or "未填写课程" }} · 预计 {{ task.estimated_minutes }} 分钟</small>
+                        </span>
+                        <span class="status-tag {{ 'is-danger' if task.is_overdue else 'is-progress' }}">{{ "已逾期" if task.is_overdue else task.status }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="empty-state">今天暂无任务。</div>
+        {% endif %}
     </article>
 
     <article class="panel">
         <div class="section-heading">
             <h2>即将截止</h2>
-            <span class="status-tag is-warning">2项</span>
+            <span class="status-tag is-warning">{{ dashboard.upcoming_tasks|length }}项</span>
         </div>
-        <div class="deadline-list">
-            <p><strong>周五 18:00</strong><span>数据库实验报告</span></p>
-            <p><strong>周日 22:00</strong><span>形势与政策小论文</span></p>
-        </div>
+        {% if dashboard.upcoming_tasks %}
+            <div class="deadline-list">
+                {% for task in dashboard.upcoming_tasks %}
+                    <p><strong>{{ task.deadline_label }}</strong><span>{{ task.title }}</span></p>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">7天内暂无截止任务。</div>
+        {% endif %}
     </article>
 
     <article class="panel">
         <div class="section-heading">
-            <h2>本周进度</h2>
-            <span class="status-tag is-good">58%</span>
+            <h2>完成数量</h2>
+            <span class="status-tag is-good">{{ dashboard.completed_count }}项</span>
         </div>
-        <div class="progress-track" aria-label="本周进度 58%">
-            <span style="width: 58%"></span>
+        {% set percent = (dashboard.completed_count * 100 // dashboard.total_count) if dashboard.total_count else 0 %}
+        <div class="progress-track" aria-label="完成进度 {{ percent }}%">
+            <span style="width: {{ percent }}%"></span>
         </div>
-        <p class="muted-text">已完成 7 个学习块，剩余 5 个学习块。</p>
+        <p class="muted-text">共 {{ dashboard.total_count }} 项任务，已完成 {{ dashboard.completed_count }} 项。</p>
     </article>
 
     <article class="panel">
         <div class="section-heading">
             <h2>风险提示</h2>
-            <span class="status-tag is-danger">需关注</span>
+            <span class="status-tag {{ 'is-danger' if dashboard.overdue_count else 'is-good' }}">{{ dashboard.overdue_count }}项逾期</span>
         </div>
-        <p class="muted-text">数据库实验报告距离截止不足 2 天，计划生成和提醒功能暂未接入。</p>
+        <p class="muted-text">
+            {% if dashboard.overdue_count %}
+                有未完成任务已超过截止时间，请进入任务中心处理。
+            {% else %}
+                暂无逾期任务。
+            {% endif %}
+        </p>
     </article>
 </section>
 
 <section class="panel action-band">
     <div>
         <h2>快速添加任务入口</h2>
-        <p class="muted-text">先进入添加任务页查看录入骨架；真实保存、AI识别和文件解析暂未接入。</p>
+        <p class="muted-text">进入添加任务页可手动新增任务；AI识别和文件解析暂未接入。</p>
     </div>
     <a class="button" href="{{ url_for('main.add_task') }}">添加任务</a>
 </section>

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}课迹 - 编辑任务{% endblock %}
+{% block page_title %}编辑任务{% endblock %}
+
+{% block content %}
+<section class="panel form-panel narrow-panel">
+    <div class="section-heading">
+        <h2>{{ task.title }}</h2>
+        <span class="status-tag {{ 'is-danger' if task.is_overdue else 'is-info' }}">{{ "已逾期" if task.is_overdue else task.status }}</span>
+    </div>
+    <form class="task-form" method="post" action="{{ url_for('main.update_task_route', task_id=task.id) }}">
+        {% include "_task_form.html" %}
+        <div class="button-row">
+            <button class="button" type="submit">保存修改</button>
+            <a class="button secondary" href="{{ url_for('main.task_detail', task_id=task.id) }}">取消</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

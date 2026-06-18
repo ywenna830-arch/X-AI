@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}课迹 - 任务详情{% endblock %}
+{% block page_title %}任务详情{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <h2>{{ task.title }}</h2>
+        <span class="status-tag {{ 'is-danger' if task.is_overdue else 'is-info' }}">{{ "已逾期" if task.is_overdue else task.status }}</span>
+    </div>
+    <div class="detail-grid">
+        <div><small>课程名称</small><strong>{{ task.course_name or "未填写" }}</strong></div>
+        <div><small>作业名称</small><strong>{{ task.title }}</strong></div>
+        <div><small>作业类型</small><strong>{{ task.task_type or "未填写" }}</strong></div>
+        <div><small>截止时间</small><strong>{{ task.deadline_label }}</strong></div>
+        <div><small>预计用时</small><strong>{{ task.estimated_minutes }} 分钟</strong></div>
+        <div><small>优先级</small><strong>{{ task.priority }}</strong></div>
+        <div><small>提交要求</small><strong>{{ task.submission_requirements or "未填写" }}</strong></div>
+        <div><small>来源</small><strong>{{ task.source_type }}</strong></div>
+        <div><small>可信状态</small><strong>{{ task.confidence }}</strong></div>
+        <div><small>更新时间</small><strong>{{ task.updated_at }}</strong></div>
+    </div>
+    <article class="task-description">
+        <h3>任务说明</h3>
+        <p>{{ task.description or "暂无说明。" }}</p>
+        <h3>来源原文</h3>
+        <p>{{ task.source_text or "暂无来源原文。" }}</p>
+    </article>
+    <div class="detail-actions">
+        <a class="button" href="{{ url_for('main.edit_task', task_id=task.id) }}">编辑任务</a>
+        <form method="post" action="{{ url_for('main.update_status_route', task_id=task.id) }}" class="inline-form">
+            <label for="detail-status">切换状态</label>
+            <select id="detail-status" name="status">
+                {% for status in statuses %}
+                    <option value="{{ status }}" {{ 'selected' if task.status == status else '' }}>{{ status }}</option>
+                {% endfor %}
+            </select>
+            <button class="button secondary" type="submit">更新状态</button>
+        </form>
+        <form method="post" action="{{ url_for('main.delete_task_route', task_id=task.id) }}" class="inline-form" onsubmit="return confirm('确认删除这个任务吗？');">
+            <button class="button danger" type="submit">删除任务</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

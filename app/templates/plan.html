@@ -7,7 +7,7 @@
 <section class="panel action-band">
     <div>
         <h2>周计划视图</h2>
-        <p class="muted-text">以下为页面布局示例，自动规划与重新规划暂未接入。</p>
+        <p class="muted-text">自动规划与重新规划属于后续阶段，当前不会生成计划。</p>
     </div>
     <div class="button-row">
         <button class="button is-disabled" type="button" disabled>一键生成计划 · 暂未接入</button>
@@ -27,11 +27,9 @@
     </article>
 
     <div class="day-grid">
-        <article class="panel day-card"><h3>周一</h3><p>数学习题 · 60分钟</p><p>英语阅读 · 45分钟</p></article>
-        <article class="panel day-card"><h3>周二</h3><p>数据库实验 · 90分钟</p></article>
-        <article class="panel day-card"><h3>周三</h3><p>复盘与补漏 · 60分钟</p></article>
-        <article class="panel day-card"><h3>周四</h3><p>报告整理 · 90分钟</p></article>
-        <article class="panel day-card"><h3>周五</h3><p>提交检查 · 30分钟</p></article>
+        {% for day in ["周一", "周二", "周三", "周四", "周五"] %}
+            <article class="panel day-card"><h3>{{ day }}</h3><p>计划生成暂未接入。</p></article>
+        {% endfor %}
     </div>
 </section>
 {% endblock %}

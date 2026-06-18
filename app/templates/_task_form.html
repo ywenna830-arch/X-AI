@@ -1,0 +1,58 @@
+{% if errors %}
+    <ul class="error-list">
+        {% for error in errors %}
+            <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+
+<div class="field-pair">
+    <label for="course-name">课程名称</label>
+    <input id="course-name" name="course_name" type="text" value="{{ form_data.course_name or '' }}" placeholder="数据库系统">
+</div>
+<div class="field-pair">
+    <label for="task-title">任务名称</label>
+    <input id="task-title" name="title" type="text" value="{{ form_data.title or '' }}" placeholder="实验报告" required>
+</div>
+<div class="field-pair">
+    <label for="task-type">作业类型</label>
+    <input id="task-type" name="task_type" type="text" value="{{ form_data.task_type or '' }}" placeholder="实验 / 阅读 / 小论文">
+</div>
+<div class="field-pair">
+    <label for="deadline">截止时间</label>
+    <input id="deadline" name="deadline" type="datetime-local" value="{{ form_data.deadline or '' }}">
+</div>
+<div class="field-pair">
+    <label for="estimated-minutes">预计用时（分钟）</label>
+    <input id="estimated-minutes" name="estimated_minutes" type="number" min="0" step="1" value="{{ form_data.estimated_minutes if form_data.estimated_minutes is defined else 0 }}">
+</div>
+<div class="field-pair">
+    <label for="priority">优先级</label>
+    <select id="priority" name="priority">
+        {% for priority in priorities %}
+            <option value="{{ priority }}" {{ 'selected' if (form_data.priority or '中') == priority else '' }}>{{ priority }}</option>
+        {% endfor %}
+    </select>
+</div>
+<div class="field-pair">
+    <label for="status">状态</label>
+    <select id="status" name="status">
+        {% for status in statuses %}
+            <option value="{{ status }}" {{ 'selected' if (form_data.status or '未开始') == status else '' }}>{{ status }}</option>
+        {% endfor %}
+    </select>
+</div>
+<div class="field-pair">
+    <label for="submission-requirements">提交要求</label>
+    <input id="submission-requirements" name="submission_requirements" type="text" value="{{ form_data.submission_requirements or '' }}" placeholder="PDF格式，上传课程平台">
+</div>
+<div class="field-pair">
+    <label for="description">任务说明</label>
+    <textarea id="description" name="description" rows="4" placeholder="补充说明">{{ form_data.description or '' }}</textarea>
+</div>
+<div class="field-pair">
+    <label for="source-text">来源原文</label>
+    <textarea id="source-text" name="source_text" rows="4" placeholder="手动粘贴原始通知">{{ form_data.source_text or '' }}</textarea>
+</div>
+<input type="hidden" name="source_type" value="{{ form_data.source_type or '手动填写' }}">
+<input type="hidden" name="confidence" value="{{ form_data.confidence or '人工录入' }}">
