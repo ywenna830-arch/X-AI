@@ -4,46 +4,74 @@
 {% block page_title %}添加任务{% endblock %}
 
 {% block content %}
-<section class="form-grid">
-    <article class="panel form-panel">
+<section class="entry-layout">
+    <article class="panel assistant-panel">
         <div class="section-heading">
-            <h2>手动填写</h2>
-            <span class="status-tag is-good">已接入</span>
+            <h2>对话式录入</h2>
+            <span class="status-tag is-muted">AI识别暂未接入</span>
         </div>
+
+        <div class="chat-window" aria-label="对话消息区域">
+            <div class="chat-message is-ai">
+                <div class="chat-avatar" aria-hidden="true">AI</div>
+                <div class="chat-bubble">
+                    <p>把老师的通知、截图或文档发给我，我会帮你整理成任务。</p>
+                    <small>当前阶段仅完成录入界面重构，文字识别将在阶段3接入。</small>
+                </div>
+            </div>
+
+            <div class="structured-note">
+                <strong>结构化确认思路</strong>
+                <ol>
+                    <li>识别课程、任务名称、截止时间和提交要求。</li>
+                    <li>展示待确认结果，由你修改或补充。</li>
+                    <li>确认后再保存为正式任务。</li>
+                </ol>
+                <p>AI识别暂未接入，本页不会自动解析或保存对话内容。</p>
+            </div>
+        </div>
+
+        <div class="chat-composer" aria-label="对话输入区域">
+            <details class="attachment-picker">
+                <summary aria-label="打开附件入口">+</summary>
+                <div class="attachment-menu">
+                    <label>
+                        上传图片
+                        <input type="file" accept="image/*" disabled>
+                        <span>阶段6接入，当前不会上传或保存文件。</span>
+                    </label>
+                    <label>
+                        上传Word
+                        <input type="file" accept=".doc,.docx" disabled>
+                        <span>阶段6接入，当前不会读取文档。</span>
+                    </label>
+                    <label>
+                        上传PDF
+                        <input type="file" accept=".pdf" disabled>
+                        <span>阶段6接入，当前不会解析PDF。</span>
+                    </label>
+                </div>
+            </details>
+
+            <label class="sr-only" for="conversation-input">课程通知内容</label>
+            <textarea id="conversation-input" rows="2" placeholder="粘贴老师通知，阶段3接入AI识别。" aria-describedby="ai-entry-status"></textarea>
+            <button class="button is-disabled" type="button" disabled>阶段3接入</button>
+        </div>
+        <p class="muted-text composer-note" id="ai-entry-status">AI识别暂未接入，发送按钮暂不可用。</p>
+    </article>
+
+    <details class="panel manual-entry-panel" {% if errors %}open{% endif %}>
+        <summary class="manual-entry-summary">
+            <span>
+                <strong>手动填写</strong>
+                <small>保留真实可用的备用入口，仍提交到现有任务保存流程。</small>
+            </span>
+            <span class="status-tag is-good">已接入</span>
+        </summary>
         <form class="task-form" method="post" action="{{ url_for('main.create_task_route') }}">
             {% include "_task_form.html" %}
             <button class="button" type="submit">保存任务</button>
         </form>
-    </article>
-
-    <article class="panel form-panel">
-        <div class="section-heading">
-            <h2>粘贴文字</h2>
-            <span class="status-tag is-muted">暂未接入AI</span>
-        </div>
-        <label for="task-text">课程通知内容</label>
-        <textarea id="task-text" rows="7" placeholder="后续阶段将用于AI识别。" disabled></textarea>
-        <button class="button is-disabled" type="button" disabled>提交识别 · 暂未接入</button>
-    </article>
-
-    <article class="panel form-panel">
-        <div class="section-heading">
-            <h2>上传图片</h2>
-            <span class="status-tag is-muted">暂未接入</span>
-        </div>
-        <label for="image-upload">通知截图</label>
-        <input id="image-upload" type="file" accept="image/*" disabled>
-        <p class="muted-text">OCR功能属于后续阶段，当前不会读取或保存文件。</p>
-    </article>
-
-    <article class="panel form-panel">
-        <div class="section-heading">
-            <h2>上传Word/PDF</h2>
-            <span class="status-tag is-muted">暂未接入</span>
-        </div>
-        <label for="doc-upload">作业文档</label>
-        <input id="doc-upload" type="file" accept=".doc,.docx,.pdf" disabled>
-        <p class="muted-text">文件解析暂未接入，当前不会读取或保存文件。</p>
-    </article>
+    </details>
 </section>
 {% endblock %}
