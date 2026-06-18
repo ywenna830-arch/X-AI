@@ -179,6 +179,12 @@ h3 {
     gap: 18px;
 }
 
+.entry-layout {
+    display: grid;
+    gap: 18px;
+    max-width: 920px;
+}
+
 .section-heading,
 .action-band,
 .button-row {
@@ -320,6 +326,193 @@ h3 {
 .form-panel {
     display: grid;
     gap: 12px;
+}
+
+.assistant-panel,
+.manual-entry-panel {
+    display: grid;
+    gap: 16px;
+}
+
+.chat-window {
+    display: grid;
+    gap: 16px;
+    min-height: 320px;
+    align-content: start;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #f8fbfc 0%, #eef4f8 100%);
+}
+
+.chat-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.chat-avatar {
+    display: grid;
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.chat-bubble {
+    max-width: 620px;
+    padding: 14px 16px;
+    border: 1px solid #c9dee5;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.chat-bubble p,
+.structured-note p,
+.composer-note {
+    margin-bottom: 0;
+}
+
+.chat-bubble small {
+    display: block;
+    margin-top: 8px;
+    color: var(--muted);
+}
+
+.structured-note {
+    max-width: 620px;
+    margin-left: 50px;
+    padding: 14px 16px;
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.structured-note strong {
+    display: block;
+    margin-bottom: 10px;
+}
+
+.structured-note ol {
+    display: grid;
+    gap: 6px;
+    margin: 0 0 10px;
+    padding-left: 20px;
+}
+
+.structured-note p {
+    color: var(--muted);
+}
+
+.chat-composer {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 10px;
+}
+
+.attachment-picker {
+    position: relative;
+}
+
+.attachment-picker summary {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--accent-dark);
+    cursor: pointer;
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 1;
+    list-style: none;
+}
+
+.attachment-picker summary::-webkit-details-marker {
+    display: none;
+}
+
+.attachment-menu {
+    position: absolute;
+    bottom: 52px;
+    left: 0;
+    z-index: 2;
+    display: grid;
+    width: min(320px, calc(100vw - 56px));
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+
+.attachment-menu label {
+    display: grid;
+    gap: 4px;
+    padding: 10px;
+    border-radius: 8px;
+    background: var(--surface-soft);
+    color: var(--text);
+}
+
+.attachment-menu input {
+    display: none;
+}
+
+.attachment-menu span {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.manual-entry-panel summary {
+    cursor: pointer;
+    list-style: none;
+}
+
+.manual-entry-panel summary::-webkit-details-marker {
+    display: none;
+}
+
+.manual-entry-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.manual-entry-summary strong,
+.manual-entry-summary small {
+    display: block;
+}
+
+.manual-entry-summary small {
+    margin-top: 4px;
+    color: var(--muted);
+    font-weight: 500;
+}
+
+.manual-entry-panel .task-form {
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
 }
 
 label {
@@ -557,6 +750,7 @@ input:disabled {
     .section-heading,
     .action-band,
     .button-row,
+    .manual-entry-summary,
     .detail-actions,
     .inline-form,
     .compact-form,
@@ -577,5 +771,26 @@ input:disabled {
 
     .button {
         width: 100%;
+    }
+
+    .chat-window {
+        min-height: 260px;
+        padding: 14px;
+    }
+
+    .chat-message {
+        gap: 10px;
+    }
+
+    .structured-note {
+        margin-left: 0;
+    }
+
+    .chat-composer {
+        grid-template-columns: 44px minmax(0, 1fr);
+    }
+
+    .chat-composer .button {
+        grid-column: 1 / -1;
     }
 }
