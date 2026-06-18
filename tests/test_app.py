@@ -36,6 +36,52 @@ def test_stage_one_pages_load():
             assert "暂未接入".encode("utf-8") in response.data
 
 
+def test_add_task_page_shows_conversation_entry_points(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        response = client.get("/tasks/new")
+
+    assert response.status_code == 200
+    assert "对话输入区域".encode("utf-8") in response.data
+    assert "把老师的通知、截图或文档发给我".encode("utf-8") in response.data
+    assert "AI识别暂未接入".encode("utf-8") in response.data
+    assert "上传图片".encode("utf-8") in response.data
+    assert "上传Word".encode("utf-8") in response.data
+    assert "上传PDF".encode("utf-8") in response.data
+    assert "阶段6接入".encode("utf-8") in response.data
+
+
+def test_manual_entry_form_still_creates_task(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        page_response = client.get("/tasks/new")
+        assert page_response.status_code == 200
+        assert 'action="/tasks"'.encode("utf-8") in page_response.data
+
+        create_response = client.post(
+            "/tasks",
+            data={
+                "course_name": "软件工程",
+                "title": "需求分析作业",
+                "task_type": "作业",
+                "description": "完成第一版需求说明",
+                "deadline": "2099-06-20T20:00",
+                "estimated_minutes": "60",
+                "priority": "中",
+                "status": "未开始",
+                "submission_requirements": "提交PDF",
+                "source_text": "老师课堂通知",
+            },
+            follow_redirects=True,
+        )
+
+    assert create_response.status_code == 200
+    assert "需求分析作业".encode("utf-8") in create_response.data
+    assert "软件工程".encode("utf-8") in create_response.data
+
+
 def test_health_check_returns_ok():
     app = create_app()
 
