@@ -1,17 +1,69 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>课迹</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-</head>
-<body>
-    <main class="shell">
-        <h1 class="brand">课迹</h1>
-        <p class="subtitle">大学生多源课程任务理解与自适应规划智能体</p>
-        <p class="status">项目初始化成功</p>
-    </main>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-</body>
-</html>
+{% extends "base.html" %}
+
+{% block title %}课迹 - 首页{% endblock %}
+{% block page_title %}今日学习总览{% endblock %}
+
+{% block content %}
+<section class="dashboard-grid">
+    <article class="panel panel-strong">
+        <div class="section-heading">
+            <h2>今日任务</h2>
+            <span class="status-tag is-info">示例数据</span>
+        </div>
+        <ul class="task-list">
+            <li>
+                <span>
+                    <strong>高等数学习题整理</strong>
+                    <small>预计 90 分钟 · 进行中</small>
+                </span>
+                <span class="status-tag is-progress">进行中</span>
+            </li>
+            <li>
+                <span>
+                    <strong>英语阅读报告提纲</strong>
+                    <small>预计 45 分钟 · 未开始</small>
+                </span>
+                <span class="status-tag">未开始</span>
+            </li>
+        </ul>
+    </article>
+
+    <article class="panel">
+        <div class="section-heading">
+            <h2>即将截止</h2>
+            <span class="status-tag is-warning">2项</span>
+        </div>
+        <div class="deadline-list">
+            <p><strong>周五 18:00</strong><span>数据库实验报告</span></p>
+            <p><strong>周日 22:00</strong><span>形势与政策小论文</span></p>
+        </div>
+    </article>
+
+    <article class="panel">
+        <div class="section-heading">
+            <h2>本周进度</h2>
+            <span class="status-tag is-good">58%</span>
+        </div>
+        <div class="progress-track" aria-label="本周进度 58%">
+            <span style="width: 58%"></span>
+        </div>
+        <p class="muted-text">已完成 7 个学习块，剩余 5 个学习块。</p>
+    </article>
+
+    <article class="panel">
+        <div class="section-heading">
+            <h2>风险提示</h2>
+            <span class="status-tag is-danger">需关注</span>
+        </div>
+        <p class="muted-text">数据库实验报告距离截止不足 2 天，计划生成和提醒功能暂未接入。</p>
+    </article>
+</section>
+
+<section class="panel action-band">
+    <div>
+        <h2>快速添加任务入口</h2>
+        <p class="muted-text">先进入添加任务页查看录入骨架；真实保存、AI识别和文件解析暂未接入。</p>
+    </div>
+    <a class="button" href="{{ url_for('main.add_task') }}">添加任务</a>
+</section>
+{% endblock %}

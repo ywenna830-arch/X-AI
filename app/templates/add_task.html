@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}课迹 - 添加任务{% endblock %}
+{% block page_title %}添加任务{% endblock %}
+
+{% block content %}
+<section class="form-grid">
+    <article class="panel form-panel">
+        <div class="section-heading">
+            <h2>粘贴文字</h2>
+            <span class="status-tag is-muted">暂未接入</span>
+        </div>
+        <label for="task-text">课程通知内容</label>
+        <textarea id="task-text" rows="7" placeholder="示例：请在周五18:00前提交数据库实验报告。"></textarea>
+        <button class="button is-disabled" type="button" disabled>提交识别 · 暂未接入</button>
+    </article>
+
+    <article class="panel form-panel">
+        <div class="section-heading">
+            <h2>上传图片</h2>
+            <span class="status-tag is-muted">暂未接入</span>
+        </div>
+        <label for="image-upload">通知截图</label>
+        <input id="image-upload" type="file" accept="image/*" disabled>
+        <p class="muted-text">OCR功能属于后续阶段，当前仅展示上传入口。</p>
+    </article>
+
+    <article class="panel form-panel">
+        <div class="section-heading">
+            <h2>上传Word/PDF</h2>
+            <span class="status-tag is-muted">暂未接入</span>
+        </div>
+        <label for="doc-upload">作业文档</label>
+        <input id="doc-upload" type="file" accept=".doc,.docx,.pdf" disabled>
+        <p class="muted-text">文件解析暂未接入，不会读取或保存文件。</p>
+    </article>
+
+    <article class="panel form-panel">
+        <div class="section-heading">
+            <h2>手动填写</h2>
+            <span class="status-tag is-muted">暂未接入</span>
+        </div>
+        <div class="field-pair">
+            <label for="course-name">课程名称</label>
+            <input id="course-name" type="text" placeholder="大学英语">
+        </div>
+        <div class="field-pair">
+            <label for="task-name">作业名称</label>
+            <input id="task-name" type="text" placeholder="阅读报告">
+        </div>
+        <button class="button is-disabled" type="button" disabled>保存任务 · 暂未接入</button>
+    </article>
+</section>
+{% endblock %}

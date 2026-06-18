@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}课迹 - 任务中心{% endblock %}
+{% block page_title %}任务中心{% endblock %}
+
+{% block content %}
+<section class="status-board">
+    <article class="panel status-column">
+        <h2>未开始</h2>
+        <div class="task-card"><strong>英语阅读报告</strong><small>周日 22:00</small></div>
+    </article>
+    <article class="panel status-column">
+        <h2>进行中</h2>
+        <div class="task-card"><strong>高等数学习题整理</strong><small>今日 21:00</small></div>
+    </article>
+    <article class="panel status-column">
+        <h2>待提交</h2>
+        <div class="task-card"><strong>数据库实验报告</strong><small>周五 18:00</small></div>
+    </article>
+    <article class="panel status-column">
+        <h2>已完成</h2>
+        <div class="task-card"><strong>心理健康课堂反馈</strong><small>已完成</small></div>
+    </article>
+    <article class="panel status-column">
+        <h2>已逾期</h2>
+        <div class="empty-state">暂无示例任务</div>
+    </article>
+</section>
+<p class="page-note">任务数据保存和状态更新暂未接入。</p>
+{% endblock %}
