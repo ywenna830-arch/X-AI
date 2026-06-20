@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from app import create_app
 from app.ai_parser import AIParseError, parse_model_json, parse_text_notice
 from app.planner import generate_plan
+from app.reminders import countdown_label, dashboard_data as reminder_dashboard_data
 from app.tasks import get_db
 
 
@@ -26,7 +27,8 @@ def test_home_page_loads():
     assert response.status_code == 200
     assert "课迹".encode("utf-8") in response.data
     assert "今日学习总览".encode("utf-8") in response.data
-    assert "快速添加任务入口".encode("utf-8") in response.data
+    assert "任务提醒与日历".encode("utf-8") in response.data
+    assert "导出未完成任务ICS".encode("utf-8") in response.data
 
 
 def test_stage_one_pages_load():
@@ -650,6 +652,235 @@ def test_delay_one_day_cannot_exceed_deadline(tmp_path):
     assert row["scheduled_date"] == item["scheduled_date"]
 
 
+def test_dashboard_classifies_today_tomorrow_upcoming_overdue_and_plan_items(tmp_path):
+    app = make_app(tmp_path)
+    today = date.today()
+    now = datetime.combine(today, datetime.min.time()).replace(hour=10)
+
+    with app.app_context():
+        db = get_db()
+        today_id = _insert_task(db, "今日截止任务", today.strftime("%Y-%m-%dT23:59"))
+        tomorrow_id = _insert_task(db, "明日截止任务", (today + timedelta(days=1)).strftime("%Y-%m-%dT12:00"))
+        _insert_task(db, "即将截止任务", (today + timedelta(days=5)).strftime("%Y-%m-%dT12:00"))
+        _insert_task(db, "已逾期任务", (today - timedelta(days=1)).strftime("%Y-%m-%dT12:00"))
+        _insert_plan_item(db, today_id, today, "今日计划项", 45)
+        _insert_plan_item(db, tomorrow_id, today + timedelta(days=1), "明日计划项", 30)
+        data = reminder_dashboard_data(db, now=now)
+
+    assert {task["title"] for task in data["today_tasks"]} == {"今日截止任务"}
+    assert {task["title"] for task in data["tomorrow_tasks"]} == {"明日截止任务"}
+    assert {item["title"] for item in data["today_plan_items"]} == {"今日计划项"}
+    assert {item["title"] for item in data["tomorrow_plan_items"]} == {"明日计划项"}
+    assert any(task["title"] == "即将截止任务" for task in data["upcoming_tasks"])
+    assert any(task["title"] == "已逾期任务" for task in data["overdue_tasks"])
+
+
+def test_completed_tasks_do_not_create_active_reminders(tmp_path):
+    app = make_app(tmp_path)
+    today = date.today()
+    now = datetime.combine(today, datetime.min.time()).replace(hour=10)
+
+    with app.app_context():
+        db = get_db()
+        task_id = _insert_task(
+            db,
+            "已完成提醒任务",
+            today.strftime("%Y-%m-%dT23:59"),
+            status="已完成",
+        )
+        db.execute(
+            "INSERT INTO task_reminders (task_id, days_before, created_at, updated_at) VALUES (?, 1, 'now', 'now')",
+            (task_id,),
+        )
+        db.commit()
+        data = reminder_dashboard_data(db, now=now)
+
+    assert data["reminders"] == []
+    assert all(task["title"] != "已完成提醒任务" for task in data["upcoming_tasks"])
+
+
+def test_reminder_settings_save_and_render(tmp_path):
+    app = make_app(tmp_path)
+    deadline = (date.today() + timedelta(days=7)).strftime("%Y-%m-%dT20:00")
+
+    with app.test_client() as client:
+        task_id = _create_task(client, "提醒设置任务", deadline)
+        response = client.post(
+            f"/tasks/{task_id}/reminders",
+            data={"reminder_days": ["7", "1"], "custom_days": "5"},
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        rows = get_db().execute(
+            "SELECT days_before FROM task_reminders WHERE task_id = ? ORDER BY days_before DESC",
+            (task_id,),
+        ).fetchall()
+
+    assert response.status_code == 200
+    assert "提醒设置已保存".encode("utf-8") in response.data
+    assert [row["days_before"] for row in rows] == [7, 5, 1]
+    assert "提前7天".encode("utf-8") in response.data
+
+
+def test_invalid_custom_reminder_days_are_rejected(tmp_path):
+    app = make_app(tmp_path)
+    deadline = (date.today() + timedelta(days=7)).strftime("%Y-%m-%dT20:00")
+
+    with app.test_client() as client:
+        task_id = _create_task(client, "非法提醒任务", deadline)
+        response = client.post(
+            f"/tasks/{task_id}/reminders",
+            data={"custom_days": "366"},
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        count = get_db().execute(
+            "SELECT COUNT(*) AS count FROM task_reminders WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()["count"]
+
+    assert response.status_code == 200
+    assert "提醒提前天数必须是0到365之间的整数".encode("utf-8") in response.data
+    assert count == 0
+
+
+def test_duplicate_reminder_settings_are_not_generated_twice(tmp_path):
+    app = make_app(tmp_path)
+    deadline = (date.today() + timedelta(days=3)).strftime("%Y-%m-%dT20:00")
+
+    with app.test_client() as client:
+        task_id = _create_task(client, "重复提醒任务", deadline)
+        client.post(
+            f"/tasks/{task_id}/reminders",
+            data={"reminder_days": ["3", "3"], "custom_days": "3"},
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        rows = get_db().execute(
+            "SELECT days_before FROM task_reminders WHERE task_id = ?",
+            (task_id,),
+        ).fetchall()
+        data = reminder_dashboard_data(get_db(), now=datetime.now())
+
+    assert [row["days_before"] for row in rows] == [3]
+    assert sum(1 for reminder in data["reminders"] if reminder["task_id"] == task_id) <= 1
+
+
+def test_countdown_labels_are_clear():
+    now = datetime(2026, 6, 20, 10, 0)
+
+    assert countdown_label(datetime(2026, 6, 20, 18, 0), now) == "今天18:00截止"
+    assert countdown_label(datetime(2026, 6, 22, 13, 0), now) == "剩余2天3小时"
+    assert countdown_label(datetime(2026, 6, 19, 9, 0), now) == "已逾期1天"
+
+
+def test_single_task_ics_export_contains_required_fields_and_alarm(tmp_path):
+    app = make_app(tmp_path)
+    deadline_day = date.today() + timedelta(days=3)
+
+    with app.test_client() as client:
+        _create_task_and_confirm_plan(client, "ICS单任务", deadline_day, 60)
+        task_id = _task_id_by_title(app, "ICS单任务")
+        client.post(f"/tasks/{task_id}/reminders", data={"reminder_days": ["1"]})
+        response = client.get(f"/tasks/{task_id}/calendar.ics")
+
+    data = response.data.decode("utf-8")
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/calendar")
+    assert "BEGIN:VCALENDAR" in data
+    assert "BEGIN:VEVENT" in data
+    assert "UID:task-" in data
+    assert "DTSTAMP:" in data
+    assert "SUMMARY:ICS单任务" in data
+    assert "DESCRIPTION:" in data
+    assert "DTSTART;TZID=Asia/Shanghai:" in data
+    assert "DTEND;TZID=Asia/Shanghai:" in data
+    assert "BEGIN:VALARM" in data
+    assert "TRIGGER:-P1D" in data
+
+
+def test_all_tasks_ics_export_excludes_completed_tasks_by_default(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        active_id = _create_task(client, "未完成导出任务", "2099-06-20T20:00")
+        completed_id = _create_task(client, "已完成导出任务", "2099-06-21T20:00", status="已完成")
+        client.post(f"/tasks/{active_id}/reminders", data={"reminder_days": ["0"]})
+        response = client.get("/calendar/tasks.ics")
+
+    data = response.data.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "未完成导出任务" in data
+    assert "已完成导出任务" not in data
+    assert f"task-{completed_id}" not in data
+
+
+def test_ics_escapes_chinese_punctuation_backslash_and_newlines(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.app_context():
+        db = get_db()
+        task_id = _insert_task(
+            db,
+            "中文,分号;反斜杠\\任务",
+            "2099-06-20T20:00",
+            description="第一行\n第二行,含逗号;含分号\\含反斜杠",
+            submission_requirements="提交,PDF;保留\\记录",
+        )
+        task = db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        ics = app.test_client().get(f"/tasks/{task_id}/calendar.ics").data.decode("utf-8")
+
+    assert task is not None
+    unfolded = _unfold_ics(ics)
+
+    assert "SUMMARY:中文\\,分号\\;反斜杠\\\\任务" in unfolded
+    assert "第一行\\n第二行\\,含逗号\\;含分号\\\\含反斜杠" in unfolded
+    assert "提交\\,PDF\\;保留\\\\记录" in unfolded
+
+
+def test_ics_uses_timezone_and_default_time_rules_for_task_without_plan(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.app_context():
+        db = get_db()
+        task_id = _insert_task(db, "无计划项导出", "2099-06-20")
+        db.commit()
+
+    with app.test_client() as client:
+        response = client.get(f"/tasks/{task_id}/calendar.ics")
+
+    data = response.data.decode("utf-8")
+
+    assert "X-WR-TIMEZONE:Asia/Shanghai" in data
+    assert "DTSTART;TZID=Asia/Shanghai:20990620T235900" in data
+    assert "DTEND;TZID=Asia/Shanghai:20990621T002900" in data
+
+
+def test_plan_item_ics_uses_default_start_and_plan_minutes(tmp_path):
+    app = make_app(tmp_path)
+    today = date.today()
+
+    with app.app_context():
+        db = get_db()
+        task_id = _insert_task(db, "计划项时间导出", (today + timedelta(days=3)).strftime("%Y-%m-%dT20:00"))
+        _insert_plan_item(db, task_id, today + timedelta(days=1), "计划项时间导出 - 推进", 45)
+
+    with app.test_client() as client:
+        response = client.get(f"/tasks/{task_id}/calendar.ics")
+
+    data = response.data.decode("utf-8")
+    start_text = (today + timedelta(days=1)).strftime("%Y%m%dT090000")
+    end_text = (today + timedelta(days=1)).strftime("%Y%m%dT094500")
+
+    assert f"DTSTART;TZID=Asia/Shanghai:{start_text}" in data
+    assert f"DTEND;TZID=Asia/Shanghai:{end_text}" in data
+
+
 def test_task_crud_status_filter_and_persistence(tmp_path):
     db_path = tmp_path / "tasks.sqlite3"
     app = create_app({"TESTING": True, "DATABASE": str(db_path)})
@@ -747,6 +978,78 @@ def test_task_validation_rejects_invalid_inputs(tmp_path):
     assert "预计时长必须为非负整数".encode("utf-8") in response.data
     assert "任务状态无效".encode("utf-8") in response.data
     assert "优先级无效".encode("utf-8") in response.data
+
+
+def _create_task(client, title, deadline, status="未开始"):
+    response = client.post(
+        "/tasks",
+        data={
+            "course_name": "软件工程",
+            "title": title,
+            "task_type": "作业",
+            "description": title,
+            "deadline": deadline,
+            "estimated_minutes": "60",
+            "priority": "中",
+            "status": status,
+            "submission_requirements": "提交PDF",
+        },
+    )
+    assert response.status_code == 302
+    return int(response.headers["Location"].rsplit("/", 1)[-1])
+
+
+def _insert_task(
+    db,
+    title,
+    deadline,
+    status="未开始",
+    description=None,
+    submission_requirements="提交PDF",
+):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor = db.execute(
+        """
+        INSERT INTO tasks (
+            course_name, title, task_type, description, deadline,
+            estimated_minutes, priority, status, submission_requirements,
+            required_materials, suggested_materials, source_type, source_text,
+            source_quote, source_filename, source_pages, confidence,
+            uncertain_fields, created_at, updated_at
+        )
+        VALUES ('软件工程', ?, '作业', ?, ?, 60, '中', ?, ?, '', '', '手动填写', '',
+            '', '', '', '人工录入', '', ?, ?)
+        """,
+        (title, description or title, deadline, status, submission_requirements, now, now),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def _insert_plan_item(db, task_id, scheduled_day, title, minutes):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor = db.execute(
+        """
+        INSERT INTO plan_items (
+            task_id, scheduled_date, title, minutes, reason, status, created_at
+        )
+        VALUES (?, ?, ?, ?, '测试计划项', '未开始', ?)
+        """,
+        (task_id, scheduled_day.isoformat(), title, minutes, now),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def _task_id_by_title(app, title):
+    with app.app_context():
+        row = get_db().execute("SELECT id FROM tasks WHERE title = ?", (title,)).fetchone()
+    assert row is not None
+    return row["id"]
+
+
+def _unfold_ics(text):
+    return text.replace("\r\n ", "")
 
 
 def _planner_task(task_id, title, task_type, deadline_day, minutes, priority, status="未开始"):

@@ -23,16 +23,16 @@
                 <a href="{{ url_for('main.task_center') }}" class="{{ 'is-active' if active_page == 'tasks' else '' }}">任务中心</a>
                 <a href="{{ url_for('main.plan') }}" class="{{ 'is-active' if active_page == 'plan' else '' }}">智能计划</a>
             </nav>
-            <p class="sidebar-note">阶段6已接入图片、DOCX和PDF文字提取。提醒和日历导出暂未接入。</p>
+            <p class="sidebar-note">阶段7已接入应用内提醒和ICS日历导出。浏览器通知仅在用户主动启用后尝试。</p>
         </aside>
 
         <div class="workspace">
             <header class="topbar">
                 <div>
-                    <p class="eyebrow">阶段6</p>
+                    <p class="eyebrow">阶段7</p>
                     <h1>{% block page_title %}{% endblock %}</h1>
                 </div>
-                <span class="status-tag is-good">文件录入已接入</span>
+                <span class="status-tag is-good">提醒与日历已接入</span>
             </header>
             <main>
                 {% with messages = get_flashed_messages() %}

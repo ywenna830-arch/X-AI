@@ -206,6 +206,7 @@ def update_task_status(task_id, status):
 
 def delete_task(task_id):
     db = get_db()
+    db.execute("DELETE FROM task_reminders WHERE task_id = ?", (task_id,))
     db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     db.commit()
 

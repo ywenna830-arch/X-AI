@@ -8,22 +8,62 @@
     <article class="panel panel-strong">
         <div class="section-heading">
             <h2>今日任务</h2>
-            <span class="status-tag is-info">{{ dashboard.today_tasks|length }}项</span>
+            <span class="status-tag is-info">{{ dashboard.today_tasks|length + dashboard.today_plan_items|length }}项</span>
         </div>
-        {% if dashboard.today_tasks %}
+        {% if dashboard.today_tasks or dashboard.today_plan_items %}
             <ul class="task-list">
                 {% for task in dashboard.today_tasks %}
                     <li>
                         <span>
                             <a class="text-link" href="{{ url_for('main.task_detail', task_id=task.id) }}"><strong>{{ task.title }}</strong></a>
-                            <small>{{ task.course_name or "未填写课程" }} · 预计 {{ task.estimated_minutes }} 分钟</small>
+                            <small>{{ task.course_name or "未填写课程" }} · {{ task.countdown }}</small>
                         </span>
                         <span class="status-tag {{ 'is-danger' if task.is_overdue else 'is-progress' }}">{{ "已逾期" if task.is_overdue else task.status }}</span>
+                    </li>
+                {% endfor %}
+                {% for item in dashboard.today_plan_items %}
+                    <li>
+                        <span>
+                            <a class="text-link" href="{{ url_for('main.task_detail', task_id=item.task_id) }}"><strong>{{ item.title }}</strong></a>
+                            <small>{{ item.course_name or "未填写课程" }} · 今日计划 {{ item.minutes }} 分钟</small>
+                        </span>
+                        <span class="status-tag is-info">计划项</span>
                     </li>
                 {% endfor %}
             </ul>
         {% else %}
             <div class="empty-state">今天暂无任务。</div>
+        {% endif %}
+    </article>
+
+    <article class="panel">
+        <div class="section-heading">
+            <h2>明日任务</h2>
+            <span class="status-tag is-info">{{ dashboard.tomorrow_tasks|length + dashboard.tomorrow_plan_items|length }}项</span>
+        </div>
+        {% if dashboard.tomorrow_tasks or dashboard.tomorrow_plan_items %}
+            <ul class="task-list">
+                {% for task in dashboard.tomorrow_tasks %}
+                    <li>
+                        <span>
+                            <a class="text-link" href="{{ url_for('main.task_detail', task_id=task.id) }}"><strong>{{ task.title }}</strong></a>
+                            <small>{{ task.course_name or "未填写课程" }} · {{ task.countdown }}</small>
+                        </span>
+                        <span class="status-tag is-progress">{{ task.status }}</span>
+                    </li>
+                {% endfor %}
+                {% for item in dashboard.tomorrow_plan_items %}
+                    <li>
+                        <span>
+                            <a class="text-link" href="{{ url_for('main.task_detail', task_id=item.task_id) }}"><strong>{{ item.title }}</strong></a>
+                            <small>{{ item.course_name or "未填写课程" }} · 明日计划 {{ item.minutes }} 分钟</small>
+                        </span>
+                        <span class="status-tag is-info">计划项</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="empty-state">明天暂无任务。</div>
         {% endif %}
     </article>
 
@@ -35,46 +75,86 @@
         {% if dashboard.upcoming_tasks %}
             <div class="deadline-list">
                 {% for task in dashboard.upcoming_tasks %}
-                    <p><strong>{{ task.deadline_label }}</strong><span>{{ task.title }}</span></p>
+                    <p>
+                        <strong>{{ task.countdown }}</strong>
+                        <span><a class="text-link" href="{{ url_for('main.task_detail', task_id=task.id) }}">{{ task.title }}</a></span>
+                    </p>
                 {% endfor %}
             </div>
         {% else %}
-            <div class="empty-state">7天内暂无截止任务。</div>
+            <div class="empty-state">提醒范围内暂无截止任务。</div>
         {% endif %}
     </article>
 
     <article class="panel">
         <div class="section-heading">
-            <h2>完成数量</h2>
-            <span class="status-tag is-good">{{ dashboard.completed_count }}项</span>
+            <h2>应用内提醒</h2>
+            <span class="status-tag is-warning">{{ dashboard.reminders|length }}条</span>
         </div>
-        {% set percent = (dashboard.completed_count * 100 // dashboard.total_count) if dashboard.total_count else 0 %}
-        <div class="progress-track" aria-label="完成进度 {{ percent }}%">
-            <span style="width: {{ percent }}%"></span>
-        </div>
-        <p class="muted-text">共 {{ dashboard.total_count }} 项任务，已完成 {{ dashboard.completed_count }} 项。</p>
+        {% if dashboard.reminders %}
+            <ul class="task-list">
+                {% for reminder in dashboard.reminders %}
+                    <li>
+                        <span>
+                            <a class="text-link" href="{{ url_for('main.task_detail', task_id=reminder.task_id) }}"><strong>{{ reminder.title }}</strong></a>
+                            <small>{{ reminder.course_name or "未填写课程" }} · {{ reminder.countdown }} · 提前{{ reminder.days_before }}天提醒</small>
+                        </span>
+                        <form method="post" action="{{ url_for('main.mark_reminder_read_route', reminder_id=reminder.id) }}">
+                            <button class="button secondary small-button" type="submit">已处理</button>
+                        </form>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="empty-state">当前没有待处理提醒。</div>
+        {% endif %}
     </article>
 
     <article class="panel">
         <div class="section-heading">
-            <h2>风险提示</h2>
+            <h2>已逾期</h2>
             <span class="status-tag {{ 'is-danger' if dashboard.overdue_count else 'is-good' }}">{{ dashboard.overdue_count }}项逾期</span>
         </div>
-        <p class="muted-text">
-            {% if dashboard.overdue_count %}
-                有未完成任务已超过截止时间，请进入任务中心处理。
-            {% else %}
-                暂无逾期任务。
-            {% endif %}
-        </p>
+        {% if dashboard.overdue_tasks %}
+            <div class="deadline-list">
+                {% for task in dashboard.overdue_tasks %}
+                    <p>
+                        <strong>{{ task.countdown }}</strong>
+                        <span><a class="text-link" href="{{ url_for('main.task_detail', task_id=task.id) }}">{{ task.title }}</a></span>
+                    </p>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">暂无逾期任务。</div>
+        {% endif %}
+    </article>
+
+    <article class="panel">
+        <div class="section-heading">
+            <h2>容量不足风险</h2>
+            <span class="status-tag {{ 'is-danger' if dashboard.capacity_risks else 'is-good' }}">{{ dashboard.capacity_risks|length }}条</span>
+        </div>
+        {% if dashboard.capacity_risks %}
+            <div class="warning-box">
+                {% for warning in dashboard.capacity_risks %}
+                    <p>{{ warning }}</p>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">当前规划容量暂无明显风险。</div>
+        {% endif %}
     </article>
 </section>
 
 <section class="panel action-band">
     <div>
-        <h2>快速添加任务入口</h2>
-        <p class="muted-text">进入添加任务页可手动新增任务；AI识别和文件解析暂未接入。</p>
+        <h2>任务提醒与日历</h2>
+        <p class="muted-text">应用内提醒会在打开网页时即时计算；浏览器通知需主动授权。</p>
     </div>
-    <a class="button" href="{{ url_for('main.add_task') }}">添加任务</a>
+    <div class="button-row">
+        <button class="button secondary" type="button" data-notification-button>启用浏览器通知</button>
+        <a class="button secondary" href="{{ url_for('main.export_all_tasks_calendar') }}">导出未完成任务ICS</a>
+        <a class="button" href="{{ url_for('main.add_task') }}">添加任务</a>
+    </div>
 </section>
 {% endblock %}

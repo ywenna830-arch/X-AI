@@ -718,6 +718,16 @@ input:disabled {
     margin: 16px 0 0;
 }
 
+.reminder-panel {
+    margin-top: 18px;
+}
+
+.reminder-options {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    gap: 10px;
+}
+
 .week-layout {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
@@ -933,7 +943,8 @@ input:disabled {
     }
 
     .detail-grid,
-    .day-grid {
+    .day-grid,
+    .reminder-options {
         grid-template-columns: 1fr;
     }
 

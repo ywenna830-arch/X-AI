@@ -1,6 +1,6 @@
 import os
 
-from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 
 from .ai_parser import AIParseError, parse_text_notice
 from .file_importer import FileImportError, extract_uploaded_file
@@ -18,11 +18,20 @@ from .planner import (
     save_plan_settings,
     update_plan_item_minutes,
 )
+from .reminders import (
+    PRESET_REMINDER_DAYS,
+    build_task_ics,
+    dashboard_data,
+    decorated_task_rows,
+    get_task_reminders,
+    mark_reminder_read,
+    save_task_reminders,
+    validate_reminder_form,
+)
 from .tasks import (
     ALLOWED_PRIORITIES,
     ALLOWED_STATUSES,
     create_task,
-    dashboard_data,
     delete_task,
     get_task,
     get_db,
@@ -42,7 +51,7 @@ def index():
     return render_template(
         "index.html",
         active_page="home",
-        dashboard=dashboard_data(),
+        dashboard=dashboard_data(get_db()),
     )
 
 
@@ -202,12 +211,55 @@ def task_detail(task_id):
     task = get_task(task_id)
     if task is None:
         abort(404)
+    db = get_db()
     return render_template(
         "task_detail.html",
         active_page="tasks",
         task=task,
         statuses=ALLOWED_STATUSES,
+        preset_reminder_days=PRESET_REMINDER_DAYS,
+        reminders=get_task_reminders(db, task_id),
     )
+
+
+@main_bp.post("/tasks/<int:task_id>/reminders")
+def save_task_reminders_route(task_id):
+    if get_task(task_id) is None:
+        abort(404)
+    errors, reminder_days = validate_reminder_form(request.form)
+    if errors:
+        for error in errors:
+            flash(error)
+    else:
+        save_task_reminders(get_db(), task_id, reminder_days)
+        flash("提醒设置已保存。")
+    return redirect(url_for("main.task_detail", task_id=task_id))
+
+
+@main_bp.post("/reminders/<int:reminder_id>/read")
+def mark_reminder_read_route(reminder_id):
+    mark_reminder_read(get_db(), reminder_id)
+    flash("提醒已标记为已处理。")
+    return redirect(request.referrer or url_for("main.index"))
+
+
+@main_bp.get("/tasks/<int:task_id>/calendar.ics")
+def export_task_calendar(task_id):
+    task = get_task(task_id)
+    if task is None:
+        abort(404)
+    ics = build_task_ics(get_db(), [task])
+    return _ics_response(ics, f"task-{task_id}.ics")
+
+
+@main_bp.get("/calendar/tasks.ics")
+def export_all_tasks_calendar():
+    rows = get_db().execute(
+        "SELECT * FROM tasks WHERE status != '已完成' ORDER BY deadline = '', deadline ASC, id ASC"
+    ).fetchall()
+    tasks = decorated_task_rows(rows)
+    ics = build_task_ics(get_db(), tasks)
+    return _ics_response(ics, "unfinished-tasks.ics")
 
 
 @main_bp.get("/tasks/<int:task_id>/edit")
@@ -409,3 +461,11 @@ def replan_remaining_route():
 @main_bp.get("/health")
 def health():
     return jsonify({"status": "ok", "service": "课迹"})
+
+
+def _ics_response(content, filename):
+    return Response(
+        content,
+        content_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

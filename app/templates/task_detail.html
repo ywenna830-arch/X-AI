@@ -36,6 +36,7 @@
     </article>
     <div class="detail-actions">
         <a class="button" href="{{ url_for('main.edit_task', task_id=task.id) }}">编辑任务</a>
+        <a class="button secondary" href="{{ url_for('main.export_task_calendar', task_id=task.id) }}">下载此任务ICS</a>
         <form method="post" action="{{ url_for('main.update_status_route', task_id=task.id) }}" class="inline-form">
             <label for="detail-status">切换状态</label>
             <select id="detail-status" name="status">
@@ -49,5 +50,28 @@
             <button class="button danger" type="submit">删除任务</button>
         </form>
     </div>
+</section>
+
+<section class="panel reminder-panel">
+    <div class="section-heading">
+        <h2>提醒设置</h2>
+        <span class="status-tag is-info">{{ reminders|length }}项</span>
+    </div>
+    <form class="task-form" method="post" action="{{ url_for('main.save_task_reminders_route', task_id=task.id) }}">
+        <div class="reminder-options">
+            {% set saved_days = reminders|map(attribute='days_before')|list %}
+            {% for day in preset_reminder_days %}
+                <label class="check-row">
+                    <input type="checkbox" name="reminder_days" value="{{ day }}" {{ 'checked' if day in saved_days else '' }}>
+                    <span>{{ "截止当天" if day == 0 else "提前" ~ day ~ "天" }}</span>
+                </label>
+            {% endfor %}
+        </div>
+        <div class="field-pair">
+            <label for="custom-days">自定义提前天数</label>
+            <input id="custom-days" name="custom_days" type="number" min="0" max="365" placeholder="0-365">
+        </div>
+        <button class="button" type="submit">保存提醒设置</button>
+    </form>
 </section>
 {% endblock %}

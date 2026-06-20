@@ -24,6 +24,7 @@ def create_app(test_config=None):
             "IMPORT_UPLOAD_DIR",
             os.path.join(app.instance_path, "uploads", "tmp"),
         ),
+        APP_TIMEZONE=os.getenv("APP_TIMEZONE", "Asia/Shanghai"),
     )
     if test_config:
         app.config.update(test_config)
@@ -31,12 +32,14 @@ def create_app(test_config=None):
     os.makedirs(app.instance_path, exist_ok=True)
 
     from .planner import init_plan_db
+    from .reminders import init_reminder_db
     from .tasks import close_db, get_db, init_db
 
     app.teardown_appcontext(close_db)
     init_db(app)
     with app.app_context():
         init_plan_db(get_db())
+        init_reminder_db(get_db())
         get_db().commit()
 
     from .routes import main_bp
