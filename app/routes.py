@@ -1,6 +1,9 @@
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
+import os
+
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 
 from .ai_parser import AIParseError, parse_text_notice
+from .file_importer import FileImportError, extract_uploaded_file
 from .planner import (
     INCOMPLETE_REASONS,
     PLAN_STATUSES,
@@ -56,6 +59,43 @@ def add_task():
     )
 
 
+@main_bp.post("/tasks/import")
+def import_task_file_route():
+    upload_dir = current_app.config["IMPORT_UPLOAD_DIR"]
+    os.makedirs(upload_dir, exist_ok=True)
+    try:
+        imported = extract_uploaded_file(
+            request.files.get("attachment"),
+            upload_dir,
+            current_app.config["MAX_IMPORT_FILE_BYTES"],
+        )
+    except FileImportError as exc:
+        return (
+            render_template(
+                "add_task.html",
+                active_page="add_task",
+                errors=[],
+                parse_errors=[exc.message],
+                form_data={},
+                statuses=ALLOWED_STATUSES,
+                priorities=ALLOWED_PRIORITIES,
+            ),
+            400,
+        )
+
+    return render_template(
+        "add_task.html",
+        active_page="add_task",
+        errors=[],
+        parse_errors=[],
+        form_data={},
+        statuses=ALLOWED_STATUSES,
+        priorities=ALLOWED_PRIORITIES,
+        notice_text=imported.text,
+        imported_file=imported,
+    )
+
+
 @main_bp.post("/tasks")
 def create_task_route():
     errors, data = validate_task_form(request.form)
@@ -82,6 +122,9 @@ def create_task_route():
 def parse_text_notice_route():
     notice_text = request.form.get("notice_text", "")
     notice_date = request.form.get("notice_date", "")
+    source_type = request.form.get("source_type", "").strip()
+    source_filename = request.form.get("source_filename", "").strip()
+    source_pages = request.form.get("source_pages", "").strip()
     try:
         result = parse_text_notice(notice_text, notice_date)
     except AIParseError as exc:
@@ -93,6 +136,11 @@ def parse_text_notice_route():
                 parse_errors=[exc.message],
                 notice_text=notice_text,
                 notice_date=notice_date,
+                imported_file={
+                    "source_type": source_type,
+                    "source_filename": source_filename,
+                    "source_pages": source_pages,
+                } if source_type else None,
                 form_data={},
                 statuses=ALLOWED_STATUSES,
                 priorities=ALLOWED_PRIORITIES,
@@ -102,6 +150,10 @@ def parse_text_notice_route():
 
     form_data = result["data"]
     form_data["source_text"] = notice_text.strip()
+    if source_type:
+        form_data["source_type"] = source_type
+        form_data["source_filename"] = source_filename
+        form_data["source_pages"] = source_pages
     return render_template(
         "ai_confirm.html",
         active_page="ai_confirm",

@@ -19,6 +19,11 @@ def create_app(test_config=None):
         AI_MODEL=os.getenv("AI_MODEL", ""),
         AI_TIMEOUT=int(os.getenv("AI_TIMEOUT", "20")),
         AI_DEMO_MODE=os.getenv("AI_DEMO_MODE", "0") == "1",
+        MAX_IMPORT_FILE_BYTES=int(os.getenv("MAX_IMPORT_FILE_BYTES", str(5 * 1024 * 1024))),
+        IMPORT_UPLOAD_DIR=os.getenv(
+            "IMPORT_UPLOAD_DIR",
+            os.path.join(app.instance_path, "uploads", "tmp"),
+        ),
     )
     if test_config:
         app.config.update(test_config)

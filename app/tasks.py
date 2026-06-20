@@ -43,6 +43,8 @@ def init_db(app):
                 source_type TEXT NOT NULL DEFAULT '手动填写',
                 source_text TEXT NOT NULL DEFAULT '',
                 source_quote TEXT NOT NULL DEFAULT '',
+                source_filename TEXT NOT NULL DEFAULT '',
+                source_pages TEXT NOT NULL DEFAULT '',
                 confidence TEXT NOT NULL DEFAULT '人工录入',
                 uncertain_fields TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
@@ -103,6 +105,8 @@ def validate_task_form(form):
         "source_type": form.get("source_type", "手动填写").strip() or "手动填写",
         "source_text": form.get("source_text", "").strip(),
         "source_quote": form.get("source_quote", "").strip(),
+        "source_filename": form.get("source_filename", "").strip(),
+        "source_pages": form.get("source_pages", "").strip(),
         "confidence": form.get("confidence", "人工录入").strip() or "人工录入",
         "uncertain_fields": form.get("uncertain_fields", "").strip(),
     }
@@ -118,9 +122,10 @@ def create_task(data):
             course_name, title, task_type, description, deadline,
             estimated_minutes, priority, status, submission_requirements,
             required_materials, suggested_materials, source_type, source_text,
-            source_quote, confidence, uncertain_fields, created_at, updated_at
+            source_quote, source_filename, source_pages, confidence,
+            uncertain_fields, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             data["course_name"],
@@ -137,6 +142,8 @@ def create_task(data):
             data["source_type"],
             data["source_text"],
             data["source_quote"],
+            data["source_filename"],
+            data["source_pages"],
             data["confidence"],
             data["uncertain_fields"],
             now,
@@ -156,7 +163,8 @@ def update_task(task_id, data):
             deadline = ?, estimated_minutes = ?, priority = ?, status = ?,
             submission_requirements = ?, required_materials = ?,
             suggested_materials = ?, source_type = ?, source_text = ?,
-            source_quote = ?, confidence = ?, uncertain_fields = ?, updated_at = ?
+            source_quote = ?, source_filename = ?, source_pages = ?,
+            confidence = ?, uncertain_fields = ?, updated_at = ?
         WHERE id = ?
         """,
         (
@@ -174,6 +182,8 @@ def update_task(task_id, data):
             data["source_type"],
             data["source_text"],
             data["source_quote"],
+            data["source_filename"],
+            data["source_pages"],
             data["confidence"],
             data["uncertain_fields"],
             _now(),
@@ -331,6 +341,8 @@ def _ensure_task_columns(db):
         "required_materials": "TEXT NOT NULL DEFAULT ''",
         "suggested_materials": "TEXT NOT NULL DEFAULT ''",
         "source_quote": "TEXT NOT NULL DEFAULT ''",
+        "source_filename": "TEXT NOT NULL DEFAULT ''",
+        "source_pages": "TEXT NOT NULL DEFAULT ''",
         "uncertain_fields": "TEXT NOT NULL DEFAULT ''",
     }
     for name, definition in columns.items():

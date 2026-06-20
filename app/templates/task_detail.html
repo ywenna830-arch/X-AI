@@ -20,6 +20,8 @@
         <div><small>必需材料</small><strong>{{ task.required_materials or "未填写" }}</strong></div>
         <div><small>建议材料</small><strong>{{ task.suggested_materials or "未填写" }}</strong></div>
         <div><small>来源</small><strong>{{ task.source_type }}</strong></div>
+        <div><small>来源文件</small><strong>{{ task.source_filename or "无" }}</strong></div>
+        <div><small>PDF页码来源</small><strong>{{ task.source_pages or "无" }}</strong></div>
         <div><small>可信状态</small><strong>{{ task.confidence }}</strong></div>
         <div><small>需确认字段</small><strong>{{ task.uncertain_fields or "无" }}</strong></div>
         <div><small>更新时间</small><strong>{{ task.updated_at }}</strong></div>

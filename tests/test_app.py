@@ -1,3 +1,7 @@
+import io
+import sys
+import types
+import zipfile
 from datetime import date, datetime, timedelta
 
 from app import create_app
@@ -59,7 +63,8 @@ def test_add_task_page_shows_conversation_entry_points(tmp_path):
     assert "上传图片".encode("utf-8") in response.data
     assert "上传Word".encode("utf-8") in response.data
     assert "上传PDF".encode("utf-8") in response.data
-    assert "阶段6接入".encode("utf-8") in response.data
+    assert "提取图片文字".encode("utf-8") in response.data
+    assert "仅支持DOCX".encode("utf-8") in response.data
 
 
 def test_manual_entry_form_still_creates_task(tmp_path):
@@ -315,6 +320,197 @@ def test_plan_confirm_ignores_forged_payload_and_saves_server_plan(tmp_path):
     assert all(row["title"] != "伪造计划" for row in rows)
     assert all(date.fromisoformat(row["scheduled_date"]) <= deadline_day for row in rows)
     assert any("每日最多占用80%可用时间" in row["reason"] for row in rows)
+
+
+def test_image_import_accepts_png_jpg_and_jpeg(monkeypatch, tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "IMPORT_UPLOAD_DIR": str(tmp_path / "imports"),
+            "AI_DEMO_MODE": True,
+        },
+    )
+    monkeypatch.setattr(
+        "app.file_importer.extract_image_text",
+        lambda path: "课程：软件工程\n作业：图片导入任务\n请在2099-06-20 20:00前提交。",
+    )
+
+    with app.test_client() as client:
+        for filename, content in (
+            ("notice.png", _png_bytes()),
+            ("notice.jpg", _jpeg_bytes()),
+            ("notice.jpeg", _jpeg_bytes()),
+        ):
+            response = client.post(
+                "/tasks/import",
+                data={"attachment": (io.BytesIO(content), filename)},
+                content_type="multipart/form-data",
+            )
+
+            assert response.status_code == 200
+            assert "图片文字已提取".encode("utf-8") in response.data
+            assert "图片导入任务".encode("utf-8") in response.data
+
+
+def test_fake_image_extension_is_rejected_and_temp_file_cleaned(monkeypatch, tmp_path):
+    upload_dir = tmp_path / "imports"
+    app = make_app(tmp_path, {"IMPORT_UPLOAD_DIR": str(upload_dir)})
+    called = {"ocr": False}
+
+    def fail_if_called(path):
+        called["ocr"] = True
+        return "不应调用"
+
+    monkeypatch.setattr("app.file_importer.extract_image_text", fail_if_called)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(b"not-a-real-image"), "fake.png")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 400
+    assert "有效PNG".encode("utf-8") in response.data
+    assert not called["ocr"]
+    assert _directory_is_empty(upload_dir)
+
+
+def test_docx_import_extracts_body_and_table(monkeypatch, tmp_path):
+    app = make_app(tmp_path, {"IMPORT_UPLOAD_DIR": str(tmp_path / "imports")})
+
+    def fake_docx_extract(path):
+        return "正文段落\n课程 | 软件工程\n任务 | DOCX表格任务"
+
+    monkeypatch.setattr("app.file_importer.extract_docx_text", fake_docx_extract)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(_docx_bytes()), "notice.docx")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 200
+    assert "Word文字已提取".encode("utf-8") in response.data
+    assert "正文段落".encode("utf-8") in response.data
+    assert "DOCX表格任务".encode("utf-8") in response.data
+
+
+def test_pdf_import_extracts_text_and_page_sources(monkeypatch, tmp_path):
+    app = make_app(tmp_path, {"IMPORT_UPLOAD_DIR": str(tmp_path / "imports")})
+    monkeypatch.setitem(sys.modules, "fitz", _fake_fitz_module(["第一页任务文字", "第二页提交要求"]))
+
+    with app.test_client() as client:
+        response = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(_pdf_bytes()), "notice.pdf")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 200
+    assert "PDF文字已提取".encode("utf-8") in response.data
+    assert "第一页任务文字".encode("utf-8") in response.data
+    assert "第1页、第2页".encode("utf-8") in response.data
+
+
+def test_scanned_pdf_without_text_shows_clear_message(monkeypatch, tmp_path):
+    app = make_app(tmp_path, {"IMPORT_UPLOAD_DIR": str(tmp_path / "imports")})
+    monkeypatch.setitem(sys.modules, "fitz", _fake_fitz_module(["", ""]))
+
+    with app.test_client() as client:
+        response = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(_pdf_bytes()), "scan.pdf")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 400
+    assert "扫描型PDF".encode("utf-8") in response.data
+    assert "不对整份PDF执行OCR".encode("utf-8") in response.data
+
+
+def test_import_rejects_oversized_and_unsupported_files(tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "IMPORT_UPLOAD_DIR": str(tmp_path / "imports"),
+            "MAX_IMPORT_FILE_BYTES": 10,
+        },
+    )
+
+    with app.test_client() as client:
+        oversized = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(_png_bytes() + b"0123456789"), "big.png")},
+            content_type="multipart/form-data",
+        )
+        unsupported = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(b"hello"), "notice.doc")},
+            content_type="multipart/form-data",
+        )
+
+    assert oversized.status_code == 400
+    assert "文件大小不能超过".encode("utf-8") in oversized.data
+    assert unsupported.status_code == 400
+    assert "仅支持 PNG".encode("utf-8") in unsupported.data
+
+
+def test_import_failure_cleans_temp_files(monkeypatch, tmp_path):
+    upload_dir = tmp_path / "imports"
+    app = make_app(tmp_path, {"IMPORT_UPLOAD_DIR": str(upload_dir)})
+
+    def broken_ocr(path):
+        raise RuntimeError("ocr failed")
+
+    monkeypatch.setattr("app.file_importer.extract_image_text", broken_ocr)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(_png_bytes()), "notice.png")},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 400
+    assert "文件解析失败".encode("utf-8") in response.data
+    assert _directory_is_empty(upload_dir)
+
+
+def test_imported_text_can_be_edited_and_sent_to_existing_ai_confirm(monkeypatch, tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "IMPORT_UPLOAD_DIR": str(tmp_path / "imports"),
+            "AI_DEMO_MODE": True,
+        },
+    )
+    monkeypatch.setattr(
+        "app.file_importer.extract_image_text",
+        lambda path: "课程：软件工程\n作业：原始图片任务\n2099-06-20 20:00前提交。",
+    )
+
+    with app.test_client() as client:
+        import_response = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(_png_bytes()), "notice.png")},
+            content_type="multipart/form-data",
+        )
+        parse_response = client.post(
+            "/tasks/ai/parse",
+            data={
+                "notice_text": "课程：软件工程\n作业：修改后的图片任务\n请在2099-06-20 20:00前提交。",
+                "source_type": "图片",
+                "source_filename": "notice.png",
+            },
+        )
+
+    assert import_response.status_code == 200
+    assert parse_response.status_code == 200
+    assert "结构化任务卡片".encode("utf-8") in parse_response.data
+    assert "修改后的图片任务".encode("utf-8") in parse_response.data
+    assert "notice.png".encode("utf-8") in parse_response.data
 
 
 def test_replan_after_unfinished_feedback_replaces_only_active_items(tmp_path):
@@ -623,3 +819,48 @@ def _plan_row(app, item_id):
 def _history_rows(app):
     with app.app_context():
         return get_db().execute("SELECT * FROM plan_item_history ORDER BY id ASC").fetchall()
+
+
+def _png_bytes():
+    return b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+
+def _jpeg_bytes():
+    return b"\xff\xd8\xff\xe0" + b"\x00" * 16
+
+
+def _pdf_bytes():
+    return b"%PDF-1.4\n% test pdf\n"
+
+
+def _docx_bytes():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types></Types>")
+        archive.writestr("word/document.xml", "<w:document></w:document>")
+    return buffer.getvalue()
+
+
+def _fake_fitz_module(page_texts):
+    class FakePage:
+        def __init__(self, text):
+            self.text = text
+
+        def get_text(self, mode):
+            assert mode == "text"
+            return self.text
+
+    class FakeDocument:
+        def __iter__(self):
+            return iter(FakePage(text) for text in page_texts)
+
+        def close(self):
+            pass
+
+    return types.SimpleNamespace(open=lambda path: FakeDocument())
+
+
+def _directory_is_empty(path):
+    if not path.exists():
+        return True
+    return not any(path.iterdir())

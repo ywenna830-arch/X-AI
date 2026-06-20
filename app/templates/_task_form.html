@@ -66,6 +66,12 @@
     <label for="source-text">来源原文</label>
     <textarea id="source-text" name="source_text" rows="4" placeholder="手动粘贴原始通知">{{ form_data.source_text or '' }}</textarea>
 </div>
+{% if form_data.source_filename or form_data.source_pages %}
+    <div class="field-pair">
+        <label for="source-file">来源文件</label>
+        <input id="source-file" type="text" value="{{ form_data.source_filename }}{% if form_data.source_pages %} · {{ form_data.source_pages }}{% endif %}" disabled>
+    </div>
+{% endif %}
 <div class="field-pair">
     <label for="uncertain-fields">需要确认的字段</label>
     <textarea id="uncertain-fields" name="uncertain_fields" rows="3" placeholder="例如：deadline">{{ form_data.uncertain_fields or '' }}</textarea>
@@ -75,3 +81,5 @@
     <input id="confidence" name="confidence" type="text" value="{{ form_data.confidence or '人工录入' }}" placeholder="原文明确 / AI推断 / 信息缺失">
 </div>
 <input type="hidden" name="source_type" value="{{ form_data.source_type or '手动填写' }}">
+<input type="hidden" name="source_filename" value="{{ form_data.source_filename or '' }}">
+<input type="hidden" name="source_pages" value="{{ form_data.source_pages or '' }}">

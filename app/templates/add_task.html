@@ -16,7 +16,7 @@
                 <div class="chat-avatar" aria-hidden="true">AI</div>
                 <div class="chat-bubble">
                     <p>把老师的文字通知粘贴给我，我会整理成待确认的任务卡片。</p>
-                    <small>当前阶段只支持文字通知；图片、Word和PDF将在后续阶段接入。</small>
+                    <small>可粘贴文字，也可从“+”上传图片、DOCX或PDF提取文字后再解析。</small>
                 </div>
             </div>
 
@@ -39,34 +39,58 @@
             </ul>
         {% endif %}
 
-        <form class="chat-composer" method="post" action="{{ url_for('main.parse_text_notice_route') }}" aria-label="对话输入区域">
+        {% if imported_file %}
+            <div class="import-preview">
+                <strong>{{ imported_file.source_type }}文字已提取</strong>
+                <span>{{ imported_file.source_filename }}{% if imported_file.source_pages %} · {{ imported_file.source_pages }}{% endif %}</span>
+                <p>请先检查并修改下方原文，再点击“解析文字”。上传文件已临时清理，不会长期保存。</p>
+            </div>
+        {% endif %}
+
+        <div class="chat-composer" aria-label="对话输入区域">
             <details class="attachment-picker">
                 <summary aria-label="打开附件入口">+</summary>
                 <div class="attachment-menu">
-                    <label>
-                        上传图片
-                        <input type="file" accept="image/*" disabled>
-                        <span>阶段6接入，当前不会上传或保存文件。</span>
-                    </label>
-                    <label>
-                        上传Word
-                        <input type="file" accept=".doc,.docx" disabled>
-                        <span>阶段6接入，当前不会读取文档。</span>
-                    </label>
-                    <label>
-                        上传PDF
-                        <input type="file" accept=".pdf" disabled>
-                        <span>阶段6接入，当前不会解析PDF。</span>
-                    </label>
+                    <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
+                        <label>
+                            上传图片
+                            <input type="file" name="attachment" accept=".png,.jpg,.jpeg" required>
+                            <span>支持PNG、JPG、JPEG；提取后可修改原文。</span>
+                        </label>
+                        <button class="button secondary small-button" type="submit">提取图片文字</button>
+                    </form>
+                    <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
+                        <label>
+                            上传Word
+                            <input type="file" name="attachment" accept=".docx" required>
+                            <span>仅支持DOCX，不支持旧版DOC。</span>
+                        </label>
+                        <button class="button secondary small-button" type="submit">提取Word文字</button>
+                    </form>
+                    <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
+                        <label>
+                            上传PDF
+                            <input type="file" name="attachment" accept=".pdf" required>
+                            <span>仅提取文本型PDF，不对整份PDF做OCR。</span>
+                        </label>
+                        <button class="button secondary small-button" type="submit">提取PDF文字</button>
+                    </form>
                 </div>
             </details>
 
-            <label class="sr-only" for="conversation-input">课程通知内容</label>
-            <textarea id="conversation-input" name="notice_text" rows="3" placeholder="粘贴老师通知文字。" aria-describedby="ai-entry-status" required>{{ notice_text or '' }}</textarea>
-            <button class="button" type="submit">解析文字</button>
-            <label class="sr-only" for="notice-date">通知日期</label>
-            <input id="notice-date" name="notice_date" type="date" value="{{ notice_date or '' }}" aria-label="通知日期">
-        </form>
+            <form class="text-parse-form" method="post" action="{{ url_for('main.parse_text_notice_route') }}">
+                <label class="sr-only" for="conversation-input">课程通知内容</label>
+                <textarea id="conversation-input" name="notice_text" rows="3" placeholder="粘贴老师通知文字。" aria-describedby="ai-entry-status" required>{{ notice_text or '' }}</textarea>
+                <button class="button" type="submit">解析文字</button>
+                <label class="sr-only" for="notice-date">通知日期</label>
+                <input id="notice-date" name="notice_date" type="date" value="{{ notice_date or '' }}" aria-label="通知日期">
+                {% if imported_file %}
+                    <input type="hidden" name="source_type" value="{{ imported_file.source_type }}">
+                    <input type="hidden" name="source_filename" value="{{ imported_file.source_filename }}">
+                    <input type="hidden" name="source_pages" value="{{ imported_file.source_pages }}">
+                {% endif %}
+            </form>
+        </div>
         <p class="muted-text composer-note" id="ai-entry-status">如果通知里有“下周三”等相对时间，请填写通知日期；未配置API密钥时会启用本地演示解析模式。</p>
     </article>
 

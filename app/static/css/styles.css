@@ -468,14 +468,48 @@ h3 {
     color: var(--text);
 }
 
-.attachment-menu input {
-    display: none;
-}
-
 .attachment-menu span {
     color: var(--muted);
     font-size: 13px;
     font-weight: 500;
+}
+
+.attachment-upload-form {
+    display: grid;
+    gap: 8px;
+}
+
+.attachment-upload-form input {
+    padding: 8px 0 0;
+    border: 0;
+}
+
+.text-parse-form {
+    display: contents;
+}
+
+.import-preview {
+    display: grid;
+    gap: 6px;
+    padding: 14px 16px;
+    border-left: 4px solid var(--good);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.import-preview strong,
+.import-preview span {
+    display: block;
+}
+
+.import-preview span {
+    color: var(--accent-dark);
+    font-weight: 800;
+}
+
+.import-preview p {
+    margin-bottom: 0;
+    color: var(--muted);
 }
 
 .manual-entry-panel summary {

@@ -16,6 +16,7 @@ env/
 # Flask and local data
 instance/
 uploads/
+task-import-*/
 *.db
 *.sqlite
 *.sqlite3
