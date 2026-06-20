@@ -2,12 +2,18 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 
 from .ai_parser import AIParseError, parse_text_notice
 from .planner import (
+    INCOMPLETE_REASONS,
+    PLAN_STATUSES,
+    delay_plan_item,
     generate_plan,
     get_availability,
     get_plan_settings,
     load_saved_plan,
+    record_plan_feedback,
+    replan_remaining_items,
     save_plan_items,
     save_plan_settings,
+    update_plan_item_minutes,
 )
 from .tasks import (
     ALLOWED_PRIORITIES,
@@ -231,6 +237,9 @@ def plan():
         saved_plan=saved_plan,
         preview=None,
         errors=[],
+        replan_warnings=[],
+        plan_statuses=PLAN_STATUSES,
+        incomplete_reasons=INCOMPLETE_REASONS,
     )
 
 
@@ -251,6 +260,9 @@ def save_plan_settings_route():
                 saved_plan=saved_plan,
                 preview=None,
                 errors=errors,
+                replan_warnings=[],
+                plan_statuses=PLAN_STATUSES,
+                incomplete_reasons=INCOMPLETE_REASONS,
             ),
             400,
         )
@@ -274,6 +286,9 @@ def generate_plan_route():
         saved_plan=saved_plan,
         preview=preview,
         errors=[],
+        replan_warnings=[],
+        plan_statuses=PLAN_STATUSES,
+        incomplete_reasons=INCOMPLETE_REASONS,
     )
 
 
@@ -289,6 +304,53 @@ def confirm_plan_route():
         return redirect(url_for("main.plan"))
     save_plan_items(db, items)
     flash("计划已确认并保存。")
+    return redirect(url_for("main.plan"))
+
+
+@main_bp.post("/plan/items/<int:item_id>/feedback")
+def record_plan_feedback_route(item_id):
+    errors = record_plan_feedback(get_db(), item_id, request.form)
+    if errors:
+        for error in errors:
+            flash(error)
+    else:
+        flash("执行反馈已记录。")
+    return redirect(url_for("main.plan"))
+
+
+@main_bp.post("/plan/items/<int:item_id>/delay")
+def delay_plan_item_route(item_id):
+    db = get_db()
+    settings = get_plan_settings(db)
+    errors = delay_plan_item(db, item_id, settings)
+    if errors:
+        for error in errors:
+            flash(error)
+    else:
+        flash("计划项已延后一天。")
+    return redirect(url_for("main.plan"))
+
+
+@main_bp.post("/plan/items/<int:item_id>/minutes")
+def update_plan_item_minutes_route(item_id):
+    errors = update_plan_item_minutes(get_db(), item_id, request.form.get("minutes", ""))
+    if errors:
+        for error in errors:
+            flash(error)
+    else:
+        flash("预计时长已更新。")
+    return redirect(url_for("main.plan"))
+
+
+@main_bp.post("/plan/replan")
+def replan_remaining_route():
+    db = get_db()
+    settings = get_plan_settings(db)
+    availability = get_availability(db, settings["horizon_days"])
+    result = replan_remaining_items(db, settings, availability)
+    for warning in result["warnings"]:
+        flash(warning)
+    flash("已根据执行反馈重新安排剩余计划。")
     return redirect(url_for("main.plan"))
 
 

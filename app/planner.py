@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timedelta
 
 from .tasks import format_deadline, parse_deadline
@@ -7,6 +8,15 @@ PRIORITY_WEIGHT = {"高": 0, "中": 1, "低": 2}
 PROGRESS_FACTORS = {"未开始": 1.0, "进行中": 0.6, "待提交": 0.15}
 DEFAULT_SETTINGS = {"horizon_days": 7, "finish_early_days": 1, "weekend_extra": 0}
 TEMPLATE_DEFAULT_MINUTES = 120
+PLAN_STATUSES = ("未开始", "已完成", "部分完成", "未完成")
+ACTIVE_PLAN_STATUSES = ("未开始", "部分完成", "未完成")
+INCOMPLETE_REASONS = (
+    "任务比预计更难",
+    "临时没有时间",
+    "今日安排过多",
+    "任务要求发生变化",
+    "已完成但忘记标记",
+)
 
 TASK_TEMPLATES = {
     "课程论文": [("资料整理", 0.2), ("提纲与论点", 0.2), ("初稿写作", 0.4), ("修改定稿", 0.15), ("检查提交", 0.05)],
@@ -55,9 +65,30 @@ def init_plan_db(db):
             title TEXT NOT NULL,
             minutes INTEGER NOT NULL,
             reason TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT '待确认',
+            status TEXT NOT NULL DEFAULT '未开始',
             created_at TEXT NOT NULL,
             FOREIGN KEY (task_id) REFERENCES tasks(id)
+        )
+        """
+    )
+    _ensure_plan_columns(db)
+    db.execute("UPDATE plan_items SET status = '未开始' WHERE status IN ('待确认', '待执行')")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plan_item_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_item_id INTEGER,
+            action TEXT NOT NULL,
+            old_status TEXT NOT NULL DEFAULT '',
+            new_status TEXT NOT NULL DEFAULT '',
+            feedback_status TEXT NOT NULL DEFAULT '',
+            completed_minutes INTEGER NOT NULL DEFAULT 0,
+            completion_ratio INTEGER NOT NULL DEFAULT 0,
+            incomplete_reason TEXT NOT NULL DEFAULT '',
+            before_plan TEXT NOT NULL DEFAULT '',
+            after_plan TEXT NOT NULL DEFAULT '',
+            adjustment_reason TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
         )
         """
     )
@@ -202,7 +233,10 @@ def generate_plan(tasks, availability, settings, today=None):
 
 
 def save_plan_items(db, items):
-    db.execute("DELETE FROM plan_items")
+    db.execute(
+        f"DELETE FROM plan_items WHERE status IN ({','.join('?' for _ in ACTIVE_PLAN_STATUSES)})",
+        ACTIVE_PLAN_STATUSES,
+    )
     now = _now()
     for item in items:
         db.execute(
@@ -210,7 +244,7 @@ def save_plan_items(db, items):
             INSERT INTO plan_items (
                 task_id, scheduled_date, title, minutes, reason, status, created_at
             )
-            VALUES (?, ?, ?, ?, ?, '待执行', ?)
+            VALUES (?, ?, ?, ?, ?, '未开始', ?)
             """,
             (
                 item["task_id"],
@@ -241,6 +275,435 @@ def load_saved_plan(db, horizon_days, today=None):
     for row in rows:
         plan.setdefault(row["scheduled_date"], []).append(dict(row))
     return plan
+
+
+def record_plan_feedback(db, item_id, form):
+    item = get_plan_item(db, item_id)
+    if item is None:
+        return ["计划项不存在。"]
+    if item["status"] == "已完成":
+        return ["已完成计划项会保留记录，不再修改。"]
+
+    status = form.get("status", "").strip()
+    if status not in PLAN_STATUSES:
+        return ["计划项状态无效。"]
+    if status == "已完成":
+        completed_minutes = item["minutes"]
+        completion_ratio = 100
+    else:
+        completed_minutes, completion_ratio, errors = _parse_completion(form, item["minutes"])
+        if errors:
+            return errors
+    if status == "部分完成" and completed_minutes <= 0:
+        return ["部分完成时请填写已完成分钟数或比例。"]
+    incomplete_reason = form.get("incomplete_reason", "").strip()
+    if status in ("部分完成", "未完成") and incomplete_reason not in INCOMPLETE_REASONS:
+        return ["请选择未完成原因。"]
+    if status == "未完成" and completed_minutes >= item["minutes"]:
+        completed_minutes = 0
+        completion_ratio = 0
+    feedback_note = form.get("feedback_note", "").strip()
+    now = _now()
+    before_plan = _snapshot_items([item])
+
+    db.execute(
+        """
+        UPDATE plan_items
+        SET status = ?, completed_minutes = ?, completion_ratio = ?,
+            incomplete_reason = ?, feedback_note = ?, updated_at = ?,
+            completed_at = ?
+        WHERE id = ?
+        """,
+        (
+            status,
+            completed_minutes,
+            completion_ratio,
+            incomplete_reason if status in ("部分完成", "未完成") else "",
+            feedback_note,
+            now,
+            now if status == "已完成" else "",
+            item_id,
+        ),
+    )
+    _insert_history(
+        db,
+        item_id=item_id,
+        action="反馈",
+        old_status=item["status"],
+        new_status=status,
+        feedback_status=status,
+        completed_minutes=completed_minutes,
+        completion_ratio=completion_ratio,
+        incomplete_reason=incomplete_reason,
+        before_plan=before_plan,
+        after_plan=_snapshot_query(db, "WHERE id = ?", (item_id,)),
+        adjustment_reason=_feedback_adjustment_reason(status, incomplete_reason),
+    )
+    db.commit()
+    return []
+
+
+def delay_plan_item(db, item_id, settings):
+    item = get_plan_item(db, item_id)
+    if item is None:
+        return ["计划项不存在。"]
+    if item["status"] == "已完成":
+        return ["已完成计划项会保留记录，不再延后。"]
+    deadline_dt = parse_deadline(item["deadline"])
+    if deadline_dt is None:
+        return ["任务缺少明确截止时间，暂不能延后。"]
+    new_date = date.fromisoformat(item["scheduled_date"]) + timedelta(days=1)
+    if new_date > deadline_dt.date():
+        return ["延后一天会超过任务截止日期，请调整预计时长或重新规划。"]
+    availability = _availability_for_date(db, new_date, settings)
+    used = _scheduled_minutes_on_date(db, new_date.isoformat(), exclude_item_id=item_id)
+    if availability["is_blocked"] or used + item["minutes"] > availability["capacity_minutes"]:
+        return ["延后一天会超过当天可用容量，请先调整可用时间或重新规划。"]
+
+    before_plan = _snapshot_items([item])
+    db.execute(
+        """
+        UPDATE plan_items
+        SET scheduled_date = ?, reason = ?, adjustment_reason = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            new_date.isoformat(),
+            f"{item['reason']} 调整：用户选择延后一天，且未超过截止日期和每日容量。",
+            "用户选择延后一天。",
+            _now(),
+            item_id,
+        ),
+    )
+    _insert_history(
+        db,
+        item_id=item_id,
+        action="延后一天",
+        old_status=item["status"],
+        new_status=item["status"],
+        before_plan=before_plan,
+        after_plan=_snapshot_query(db, "WHERE id = ?", (item_id,)),
+        adjustment_reason="用户选择延后一天，已检查截止日期和每日容量。",
+    )
+    db.commit()
+    return []
+
+
+def update_plan_item_minutes(db, item_id, minutes):
+    item = get_plan_item(db, item_id)
+    if item is None:
+        return ["计划项不存在。"]
+    if item["status"] == "已完成":
+        return ["已完成计划项会保留记录，不再修改预计时长。"]
+    try:
+        minutes_value = int(minutes)
+    except ValueError:
+        return ["预计时长必须是正整数分钟。"]
+    if minutes_value <= 0 or minutes_value > 1440:
+        return ["预计时长必须在 1 到 1440 分钟之间。"]
+    before_plan = _snapshot_items([item])
+    db.execute(
+        """
+        UPDATE plan_items
+        SET minutes = ?, adjustment_reason = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (minutes_value, "用户修改预计时长。", _now(), item_id),
+    )
+    _insert_history(
+        db,
+        item_id=item_id,
+        action="修改预计时长",
+        old_status=item["status"],
+        new_status=item["status"],
+        before_plan=before_plan,
+        after_plan=_snapshot_query(db, "WHERE id = ?", (item_id,)),
+        adjustment_reason=f"预计时长由 {item['minutes']} 分钟调整为 {minutes_value} 分钟。",
+    )
+    db.commit()
+    return []
+
+
+def replan_remaining_items(db, settings, availability, today=None):
+    today = today or date.today()
+    active_items = _active_plan_items(db)
+    if not active_items:
+        return {"warnings": ["没有需要重新规划的剩余计划。"], "items": []}
+
+    before_plan = _snapshot_items(active_items)
+    tasks = [_task_from_plan_item(item) for item in active_items if _remaining_from_plan_item(item) > 0]
+    if not tasks:
+        _insert_history(
+            db,
+            item_id=None,
+            action="重新规划",
+            before_plan=before_plan,
+            after_plan="[]",
+            adjustment_reason="反馈显示剩余计划已完成，未新增安排。",
+        )
+        db.execute(
+            f"DELETE FROM plan_items WHERE status IN ({','.join('?' for _ in ACTIVE_PLAN_STATUSES)})",
+            ACTIVE_PLAN_STATUSES,
+        )
+        db.commit()
+        return {"warnings": [], "items": []}
+    adjusted_availability = _adjust_availability_for_feedback(availability, active_items)
+    preview = generate_plan(tasks, adjusted_availability, settings, today=today)
+    after_items = preview["items"]
+    now = _now()
+
+    db.execute(
+        f"DELETE FROM plan_items WHERE status IN ({','.join('?' for _ in ACTIVE_PLAN_STATUSES)})",
+        ACTIVE_PLAN_STATUSES,
+    )
+    for item in after_items:
+        db.execute(
+            """
+            INSERT INTO plan_items (
+                task_id, scheduled_date, title, minutes, reason, status,
+                completed_minutes, completion_ratio, incomplete_reason,
+                feedback_note, adjustment_reason, created_at, updated_at, completed_at
+            )
+            VALUES (?, ?, ?, ?, ?, '未开始', 0, 0, '', '', ?, ?, ?, '')
+            """,
+            (
+                item["task_id"],
+                item["scheduled_date"],
+                item["title"],
+                item["minutes"],
+                f"{item['reason']} 调整：根据执行反馈重新安排剩余计划。",
+                "根据执行反馈重新规划剩余计划。",
+                now,
+                now,
+            ),
+        )
+    after_plan = _snapshot_query(
+        db,
+        f"WHERE status IN ({','.join('?' for _ in ACTIVE_PLAN_STATUSES)})",
+        ACTIVE_PLAN_STATUSES,
+    )
+    _insert_history(
+        db,
+        item_id=None,
+        action="重新规划",
+        before_plan=before_plan,
+        after_plan=after_plan,
+        adjustment_reason="保留已完成记录，仅根据反馈重新安排剩余计划。",
+    )
+    db.commit()
+    return {"warnings": preview["warnings"], "items": after_items}
+
+
+def get_plan_item(db, item_id):
+    row = db.execute(
+        """
+        SELECT plan_items.*, tasks.title AS task_title, tasks.deadline,
+            tasks.priority, tasks.task_type, tasks.description, tasks.course_name
+        FROM plan_items
+        JOIN tasks ON tasks.id = plan_items.task_id
+        WHERE plan_items.id = ?
+        """,
+        (item_id,),
+    ).fetchone()
+    return row
+
+
+def _ensure_plan_columns(db):
+    existing_columns = {
+        row["name"] for row in db.execute("PRAGMA table_info(plan_items)").fetchall()
+    }
+    columns = {
+        "completed_minutes": "INTEGER NOT NULL DEFAULT 0",
+        "completion_ratio": "INTEGER NOT NULL DEFAULT 0",
+        "incomplete_reason": "TEXT NOT NULL DEFAULT ''",
+        "feedback_note": "TEXT NOT NULL DEFAULT ''",
+        "adjustment_reason": "TEXT NOT NULL DEFAULT ''",
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+        "completed_at": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, definition in columns.items():
+        if name not in existing_columns:
+            db.execute(f"ALTER TABLE plan_items ADD COLUMN {name} {definition}")
+
+
+def _parse_completion(form, planned_minutes):
+    errors = []
+    raw_minutes = form.get("completed_minutes", "").strip()
+    raw_ratio = form.get("completion_ratio", "").strip()
+    completed_minutes = 0
+    completion_ratio = 0
+
+    if raw_ratio and (not raw_minutes or raw_minutes == "0"):
+        try:
+            completion_ratio = int(raw_ratio)
+        except ValueError:
+            errors.append("已完成比例必须是0到100之间的整数。")
+        if completion_ratio < 0 or completion_ratio > 100:
+            errors.append("已完成比例必须是0到100之间的整数。")
+        completed_minutes = int(round(planned_minutes * completion_ratio / 100))
+    elif raw_minutes:
+        try:
+            completed_minutes = int(raw_minutes)
+        except ValueError:
+            errors.append("已完成分钟数必须是非负整数。")
+        if completed_minutes < 0 or completed_minutes > planned_minutes:
+            errors.append("已完成分钟数不能小于0或超过计划分钟数。")
+        if planned_minutes > 0:
+            completion_ratio = int(round(completed_minutes * 100 / planned_minutes))
+    return completed_minutes, completion_ratio, errors
+
+
+def _feedback_adjustment_reason(status, incomplete_reason):
+    if status == "已完成":
+        return "用户标记已完成，保留该计划记录。"
+    if status == "部分完成":
+        return f"根据部分完成反馈调整剩余计划：{incomplete_reason}。"
+    if status == "未完成":
+        return f"根据未完成反馈保留剩余工作量：{incomplete_reason}。"
+    return "用户更新计划项状态。"
+
+
+def _active_plan_items(db):
+    rows = db.execute(
+        f"""
+        SELECT plan_items.*, tasks.title AS task_title, tasks.deadline,
+            tasks.priority, tasks.task_type, tasks.description, tasks.course_name
+        FROM plan_items
+        JOIN tasks ON tasks.id = plan_items.task_id
+        WHERE plan_items.status IN ({','.join('?' for _ in ACTIVE_PLAN_STATUSES)})
+        ORDER BY plan_items.scheduled_date ASC, plan_items.id ASC
+        """,
+        ACTIVE_PLAN_STATUSES,
+    ).fetchall()
+    return rows
+
+
+def _task_from_plan_item(item):
+    remaining = _remaining_from_plan_item(item)
+    return {
+        "id": item["task_id"],
+        "title": item["title"],
+        "task_type": item["task_type"],
+        "description": item["description"],
+        "deadline": item["deadline"],
+        "deadline_dt": parse_deadline(item["deadline"]),
+        "estimated_minutes": remaining,
+        "priority": item["priority"],
+        "status": "未开始",
+        "allow_small_workload": True,
+    }
+
+
+def _remaining_from_plan_item(item):
+    completed = min(item["completed_minutes"], item["minutes"])
+    remaining = max(0, item["minutes"] - completed)
+    if item["status"] == "未完成":
+        remaining = item["minutes"]
+    if item["incomplete_reason"] in ("任务比预计更难", "任务要求发生变化"):
+        remaining = int(round(remaining * 1.25))
+    if item["incomplete_reason"] == "已完成但忘记标记":
+        remaining = 0
+    return max(0, remaining)
+
+
+def _adjust_availability_for_feedback(availability, active_items):
+    reduce_capacity = any(item["incomplete_reason"] == "今日安排过多" for item in active_items)
+    if not reduce_capacity:
+        return availability
+    adjusted = []
+    for day in availability:
+        adjusted.append({**day, "available_minutes": int(day["available_minutes"] * 0.8)})
+    return adjusted
+
+
+def _availability_for_date(db, target_date, settings):
+    row = db.execute(
+        "SELECT * FROM study_availability WHERE study_date = ?",
+        (target_date.isoformat(),),
+    ).fetchone()
+    day = {
+        "date": target_date.isoformat(),
+        "label": _day_label(target_date),
+        "available_minutes": row["available_minutes"] if row else 120,
+        "is_blocked": row["is_blocked"] if row else 0,
+    }
+    return _prepare_day(day, settings)
+
+
+def _scheduled_minutes_on_date(db, scheduled_date, exclude_item_id=None):
+    row = db.execute(
+        """
+        SELECT COALESCE(SUM(minutes), 0) AS total
+        FROM plan_items
+        WHERE scheduled_date = ? AND id != ?
+        """,
+        (scheduled_date, exclude_item_id or 0),
+    ).fetchone()
+    return row["total"]
+
+
+def _snapshot_items(items):
+    return json.dumps([_snapshot_item(item) for item in items], ensure_ascii=False)
+
+
+def _snapshot_query(db, where_sql, values):
+    rows = db.execute(f"SELECT * FROM plan_items {where_sql} ORDER BY scheduled_date ASC, id ASC", values).fetchall()
+    return _snapshot_items(rows)
+
+
+def _snapshot_item(item):
+    return {
+        "id": item["id"],
+        "task_id": item["task_id"],
+        "scheduled_date": item["scheduled_date"],
+        "title": item["title"],
+        "minutes": item["minutes"],
+        "status": item["status"],
+        "completed_minutes": item["completed_minutes"],
+        "completion_ratio": item["completion_ratio"],
+        "incomplete_reason": item["incomplete_reason"],
+        "adjustment_reason": item["adjustment_reason"],
+    }
+
+
+def _insert_history(
+    db,
+    item_id,
+    action,
+    old_status="",
+    new_status="",
+    feedback_status="",
+    completed_minutes=0,
+    completion_ratio=0,
+    incomplete_reason="",
+    before_plan="",
+    after_plan="",
+    adjustment_reason="",
+):
+    db.execute(
+        """
+        INSERT INTO plan_item_history (
+            plan_item_id, action, old_status, new_status, feedback_status,
+            completed_minutes, completion_ratio, incomplete_reason,
+            before_plan, after_plan, adjustment_reason, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            item_id,
+            action,
+            old_status,
+            new_status,
+            feedback_status,
+            completed_minutes,
+            completion_ratio,
+            incomplete_reason,
+            before_plan,
+            after_plan,
+            adjustment_reason,
+            _now(),
+        ),
+    )
 
 
 def _parse_settings(form, errors):
@@ -299,6 +762,8 @@ def _sortable_tasks(tasks):
 def _remaining_minutes(task):
     estimated = int(task.get("estimated_minutes") or 0) or TEMPLATE_DEFAULT_MINUTES
     factor = PROGRESS_FACTORS.get(task.get("status", "未开始"), 1.0)
+    if task.get("allow_small_workload"):
+        return max(1, int(round(estimated * factor)))
     return max(15, int(round(estimated * factor)))
 
 

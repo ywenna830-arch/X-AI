@@ -317,6 +317,143 @@ def test_plan_confirm_ignores_forged_payload_and_saves_server_plan(tmp_path):
     assert any("每日最多占用80%可用时间" in row["reason"] for row in rows)
 
 
+def test_replan_after_unfinished_feedback_replaces_only_active_items(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        _create_task_and_confirm_plan(client, "未完成重规划", date.today() + timedelta(days=5), 180)
+        rows = _plan_rows(app)
+        first_id = rows[0]["id"]
+
+        feedback_response = client.post(
+            f"/plan/items/{first_id}/feedback",
+            data={"status": "未完成", "incomplete_reason": "临时没有时间"},
+            follow_redirects=True,
+        )
+        replan_response = client.post("/plan/replan", follow_redirects=True)
+
+    replanned_rows = _plan_rows(app)
+    history_rows = _history_rows(app)
+
+    assert feedback_response.status_code == 200
+    assert replan_response.status_code == 200
+    assert replanned_rows
+    assert first_id not in {row["id"] for row in replanned_rows}
+    assert any(row["action"] == "重新规划" for row in history_rows)
+
+
+def test_partial_completion_replans_only_remaining_minutes(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        _create_task_and_confirm_plan(client, "部分完成作业", date.today() + timedelta(days=5), 160)
+        before_rows = _plan_rows(app)
+        first = before_rows[0]
+        before_total = sum(row["minutes"] for row in before_rows)
+        client.post(
+            f"/plan/items/{first['id']}/feedback",
+            data={
+                "status": "部分完成",
+                "completion_ratio": "50",
+                "incomplete_reason": "任务比预计更难",
+            },
+            follow_redirects=True,
+        )
+        client.post("/plan/replan", follow_redirects=True)
+
+    after_total = sum(row["minutes"] for row in _plan_rows(app))
+
+    assert after_total > before_total - first["minutes"]
+    assert after_total < before_total + first["minutes"]
+
+
+def test_update_estimated_minutes_affects_replan(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        _create_task_and_confirm_plan(client, "时长调整作业", date.today() + timedelta(days=5), 120)
+        before_rows = _plan_rows(app)
+        first = before_rows[0]
+        before_total = sum(row["minutes"] for row in before_rows)
+        client.post(
+            f"/plan/items/{first['id']}/minutes",
+            data={"minutes": str(first["minutes"] + 45)},
+            follow_redirects=True,
+        )
+        client.post("/plan/replan", follow_redirects=True)
+
+    after_total = sum(row["minutes"] for row in _plan_rows(app))
+
+    assert after_total == before_total + 45
+
+
+def test_replan_reports_capacity_risk(tmp_path):
+    app = make_app(tmp_path)
+    today = date.today()
+
+    with app.test_client() as client:
+        _save_availability(client, today, [180, 180, 180], horizon_days=7)
+        _create_task_and_confirm_plan(client, "容量风险作业", today + timedelta(days=2), 300)
+        _save_availability(client, today, [30, 30, 30], horizon_days=7)
+        response = client.post("/plan/replan", follow_redirects=True)
+
+    assert "超出当前可用容量".encode("utf-8") in response.data
+
+
+def test_completed_plan_item_is_preserved_during_replan(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        _create_task_and_confirm_plan(client, "完成保护作业", date.today() + timedelta(days=5), 160)
+        completed = _plan_rows(app)[0]
+        client.post(
+            f"/plan/items/{completed['id']}/feedback",
+            data={"status": "已完成"},
+            follow_redirects=True,
+        )
+        client.post("/plan/replan", follow_redirects=True)
+
+    row = _plan_row(app, completed["id"])
+
+    assert row is not None
+    assert row["scheduled_date"] == completed["scheduled_date"]
+    assert row["minutes"] == completed["minutes"]
+    assert row["status"] == "已完成"
+    assert row["completed_minutes"] == completed["minutes"]
+
+
+def test_replan_does_not_schedule_after_deadline(tmp_path):
+    app = make_app(tmp_path)
+    deadline_day = date.today() + timedelta(days=2)
+
+    with app.test_client() as client:
+        _create_task_and_confirm_plan(client, "截止保护作业", deadline_day, 180)
+        first = _plan_rows(app)[0]
+        client.post(
+            f"/plan/items/{first['id']}/feedback",
+            data={"status": "未完成", "incomplete_reason": "临时没有时间"},
+            follow_redirects=True,
+        )
+        client.post("/plan/replan", follow_redirects=True)
+
+    assert all(date.fromisoformat(row["scheduled_date"]) <= deadline_day for row in _plan_rows(app))
+
+
+def test_delay_one_day_cannot_exceed_deadline(tmp_path):
+    app = make_app(tmp_path)
+    deadline_day = date.today()
+
+    with app.test_client() as client:
+        _create_task_and_confirm_plan(client, "当天截止作业", deadline_day, 60)
+        item = _plan_rows(app)[0]
+        response = client.post(f"/plan/items/{item['id']}/delay", follow_redirects=True)
+
+    row = _plan_row(app, item["id"])
+
+    assert "超过任务截止日期".encode("utf-8") in response.data
+    assert row["scheduled_date"] == item["scheduled_date"]
+
+
 def test_task_crud_status_filter_and_persistence(tmp_path):
     db_path = tmp_path / "tasks.sqlite3"
     app = create_app({"TESTING": True, "DATABASE": str(db_path)})
@@ -442,3 +579,47 @@ def _availability(start_day, minutes_by_day, blocked_indexes=None):
         }
         for index, minutes in enumerate(minutes_by_day)
     ]
+
+
+def _create_task_and_confirm_plan(client, title, deadline_day, minutes):
+    response = client.post(
+        "/tasks",
+        data={
+            "course_name": "软件工程",
+            "title": title,
+            "task_type": "编程作业",
+            "description": title,
+            "deadline": deadline_day.strftime("%Y-%m-%dT20:00"),
+            "estimated_minutes": str(minutes),
+            "priority": "高",
+            "status": "未开始",
+        },
+    )
+    assert response.status_code == 302
+    confirm_response = client.post("/plan/confirm", follow_redirects=True)
+    assert confirm_response.status_code == 200
+
+
+def _save_availability(client, start_day, minutes_by_day, horizon_days=7):
+    data = {"horizon_days": str(horizon_days), "finish_early_days": "0"}
+    for index in range(horizon_days):
+        day = start_day + timedelta(days=index)
+        minutes = minutes_by_day[index] if index < len(minutes_by_day) else minutes_by_day[-1]
+        data[f"minutes_{day.isoformat()}"] = str(minutes)
+    response = client.post("/plan/settings", data=data, follow_redirects=True)
+    assert response.status_code == 200
+
+
+def _plan_rows(app):
+    with app.app_context():
+        return get_db().execute("SELECT * FROM plan_items ORDER BY id ASC").fetchall()
+
+
+def _plan_row(app, item_id):
+    with app.app_context():
+        return get_db().execute("SELECT * FROM plan_items WHERE id = ?", (item_id,)).fetchone()
+
+
+def _history_rows(app):
+    with app.app_context():
+        return get_db().execute("SELECT * FROM plan_item_history ORDER BY id ASC").fetchall()

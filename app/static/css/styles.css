@@ -779,6 +779,50 @@ input:disabled {
     line-height: 1.55;
 }
 
+.feedback-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.feedback-form label {
+    align-self: center;
+    font-size: 13px;
+}
+
+.feedback-form input,
+.feedback-form select,
+.minutes-form input {
+    min-height: 38px;
+    padding: 8px;
+}
+
+.feedback-form .button {
+    grid-column: 1 / -1;
+}
+
+.plan-item-actions,
+.minutes-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.minutes-form input {
+    width: 110px;
+}
+
+.protected-note {
+    padding: 8px;
+    border-radius: 8px;
+    background: #e4f4ea;
+    color: var(--good);
+    font-weight: 700;
+}
+
 .warning-box {
     padding: 12px;
     border: 1px solid #f5c06f;
@@ -882,5 +926,14 @@ input:disabled {
 
     .chat-composer .button {
         grid-column: 1 / -1;
+    }
+
+    .feedback-form {
+        grid-template-columns: 1fr;
+    }
+
+    .minutes-form,
+    .minutes-form input {
+        width: 100%;
     }
 }

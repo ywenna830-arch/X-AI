@@ -17,9 +17,14 @@
         <h2>生成待确认计划</h2>
         <p class="muted-text">基于任务截止时间、预计时长、优先级、当前状态和每日可用时间生成。</p>
     </div>
-    <form class="button-row" method="post" action="{{ url_for('main.generate_plan_route') }}">
-        <button class="button" type="submit">生成待确认计划</button>
-    </form>
+    <div class="button-row">
+        <form method="post" action="{{ url_for('main.generate_plan_route') }}">
+            <button class="button" type="submit">生成待确认计划</button>
+        </form>
+        <form method="post" action="{{ url_for('main.replan_remaining_route') }}">
+            <button class="button secondary" type="submit">一键重新规划</button>
+        </form>
+    </div>
 </section>
 
 <section class="week-layout">
@@ -127,6 +132,49 @@
                                     <strong>{{ item.title }}</strong>
                                     <span>{{ item.minutes }} 分钟 · {{ item.status }}</span>
                                     <p>{{ item.reason }}</p>
+                                    {% if item.adjustment_reason %}
+                                        <p>{{ item.adjustment_reason }}</p>
+                                    {% endif %}
+                                    {% if item.status == "已完成" %}
+                                        <p class="protected-note">已完成记录已保留，不再修改或重排。</p>
+                                    {% else %}
+                                        <form class="feedback-form" method="post" action="{{ url_for('main.record_plan_feedback_route', item_id=item.id) }}">
+                                            <label for="status-{{ item.id }}">执行状态</label>
+                                            <select id="status-{{ item.id }}" name="status">
+                                                {% for status in plan_statuses %}
+                                                    <option value="{{ status }}" {{ 'selected' if item.status == status else '' }}>{{ status }}</option>
+                                                {% endfor %}
+                                            </select>
+
+                                            <label for="completed-minutes-{{ item.id }}">已完成分钟数</label>
+                                            <input id="completed-minutes-{{ item.id }}" name="completed_minutes" type="number" min="0" max="{{ item.minutes }}" value="{{ item.completed_minutes }}">
+
+                                            <label for="completion-ratio-{{ item.id }}">或已完成比例</label>
+                                            <input id="completion-ratio-{{ item.id }}" name="completion_ratio" type="number" min="0" max="100" value="{{ item.completion_ratio }}">
+
+                                            <label for="reason-{{ item.id }}">未完成原因</label>
+                                            <select id="reason-{{ item.id }}" name="incomplete_reason">
+                                                <option value="">按需选择</option>
+                                                {% for reason in incomplete_reasons %}
+                                                    <option value="{{ reason }}" {{ 'selected' if item.incomplete_reason == reason else '' }}>{{ reason }}</option>
+                                                {% endfor %}
+                                            </select>
+
+                                            <label for="note-{{ item.id }}">反馈备注</label>
+                                            <input id="note-{{ item.id }}" name="feedback_note" type="text" value="{{ item.feedback_note }}">
+
+                                            <button class="button small-button" type="submit">记录反馈</button>
+                                        </form>
+                                        <div class="plan-item-actions">
+                                            <form method="post" action="{{ url_for('main.delay_plan_item_route', item_id=item.id) }}">
+                                                <button class="button secondary small-button" type="submit">延后一天</button>
+                                            </form>
+                                            <form class="minutes-form" method="post" action="{{ url_for('main.update_plan_item_minutes_route', item_id=item.id) }}">
+                                                <input name="minutes" type="number" min="1" max="1440" value="{{ item.minutes }}" aria-label="修改预计时长">
+                                                <button class="button secondary small-button" type="submit">修改预计时长</button>
+                                            </form>
+                                        </div>
+                                    {% endif %}
                                 </div>
                             {% endfor %}
                         {% else %}
