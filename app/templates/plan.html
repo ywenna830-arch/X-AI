@@ -4,32 +4,139 @@
 {% block page_title %}智能计划{% endblock %}
 
 {% block content %}
+{% if errors %}
+    <ul class="error-list">
+        {% for error in errors %}
+            <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+{% endif %}
+
 <section class="panel action-band">
     <div>
-        <h2>周计划视图</h2>
-        <p class="muted-text">自动规划与重新规划属于后续阶段，当前不会生成计划。</p>
+        <h2>生成待确认计划</h2>
+        <p class="muted-text">基于任务截止时间、预计时长、优先级、当前状态和每日可用时间生成。</p>
     </div>
-    <div class="button-row">
-        <button class="button is-disabled" type="button" disabled>一键生成计划 · 暂未接入</button>
-        <button class="button secondary is-disabled" type="button" disabled>一键重新规划 · 暂未接入</button>
-    </div>
+    <form class="button-row" method="post" action="{{ url_for('main.generate_plan_route') }}">
+        <button class="button" type="submit">生成待确认计划</button>
+    </form>
 </section>
 
 <section class="week-layout">
     <article class="panel time-panel">
         <div class="section-heading">
             <h2>每日可用时间</h2>
-            <span class="status-tag is-muted">暂未接入</span>
+            <span class="status-tag is-good">已接入</span>
         </div>
-        <label for="daily-time">今日可用学习时间</label>
-        <input id="daily-time" type="text" value="2.5 小时" disabled>
-        <p class="muted-text">时间设置保存功能将在后续阶段接入。</p>
+        <form class="task-form" method="post" action="{{ url_for('main.save_plan_settings_route') }}">
+            <div class="field-pair">
+                <label for="horizon-days">计划范围</label>
+                <select id="horizon-days" name="horizon_days">
+                    <option value="7" {{ 'selected' if settings.horizon_days == 7 else '' }}>未来7天</option>
+                    <option value="14" {{ 'selected' if settings.horizon_days == 14 else '' }}>未来14天</option>
+                </select>
+            </div>
+            <div class="field-pair">
+                <label for="finish-early-days">提前完成天数</label>
+                <input id="finish-early-days" name="finish_early_days" type="number" min="0" max="14" value="{{ settings.finish_early_days }}">
+            </div>
+            <label class="check-row">
+                <input type="checkbox" name="weekend_extra" value="1" {{ 'checked' if settings.weekend_extra else '' }}>
+                <span>周末增加20%可用时间</span>
+            </label>
+
+            <div class="availability-list">
+                {% for day in availability %}
+                    <div class="availability-row">
+                        <label for="minutes-{{ day.date }}">{{ day.label }}</label>
+                        <input id="minutes-{{ day.date }}" name="minutes_{{ day.date }}" type="number" min="0" max="1440" value="{{ day.available_minutes }}">
+                        <label class="check-row small-check">
+                            <input type="checkbox" name="blocked_dates" value="{{ day.date }}" {{ 'checked' if day.is_blocked else '' }}>
+                            <span>不可安排</span>
+                        </label>
+                    </div>
+                {% endfor %}
+            </div>
+            <button class="button" type="submit">保存设置</button>
+        </form>
     </article>
 
-    <div class="day-grid">
-        {% for day in ["周一", "周二", "周三", "周四", "周五"] %}
-            <article class="panel day-card"><h3>{{ day }}</h3><p>计划生成暂未接入。</p></article>
-        {% endfor %}
+    <div class="plan-column">
+        {% if preview %}
+            <section class="panel preview-panel">
+                <div class="section-heading">
+                    <h2>待确认计划</h2>
+                    <span class="status-tag is-info">{{ preview["items"]|length }} 项</span>
+                </div>
+                {% if preview["warnings"] %}
+                    <div class="warning-box">
+                        {% for warning in preview["warnings"] %}
+                            <p>{{ warning }}</p>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+                <div class="day-grid">
+                    {% for day in preview["days"] %}
+                        <article class="day-card">
+                            <div class="section-heading">
+                                <h3>{{ day.label }}</h3>
+                                {% if day.is_blocked %}
+                                    <span class="status-tag is-muted">不可安排</span>
+                                {% else %}
+                                    <span class="status-tag is-info">{{ day.scheduled_minutes }}/{{ day.capacity_minutes }} 分钟</span>
+                                {% endif %}
+                            </div>
+                            {% if day["items"] %}
+                                {% for item in day["items"] %}
+                                    <div class="plan-item">
+                                        <strong>{{ item.title }}</strong>
+                                        <span>{{ item.minutes }} 分钟</span>
+                                        <p>{{ item.reason }}</p>
+                                    </div>
+                                {% endfor %}
+                            {% else %}
+                                <p class="muted-text">当天暂无安排。</p>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+                <form method="post" action="{{ url_for('main.confirm_plan_route') }}">
+                    <input type="hidden" name="plan_payload" value="{{ preview_payload }}">
+                    <button class="button" type="submit">确认并保存计划</button>
+                </form>
+            </section>
+        {% endif %}
+
+        <section class="panel">
+            <div class="section-heading">
+                <h2>已保存周计划</h2>
+                <span class="status-tag is-good">真实数据</span>
+            </div>
+            <div class="day-grid">
+                {% for day in availability %}
+                    <article class="day-card">
+                        <div class="section-heading">
+                            <h3>{{ day.label }}</h3>
+                            {% if day.is_blocked %}
+                                <span class="status-tag is-muted">不可安排</span>
+                            {% endif %}
+                        </div>
+                        {% set items = saved_plan.get(day.date, []) %}
+                        {% if items %}
+                            {% for item in items %}
+                                <div class="plan-item">
+                                    <strong>{{ item.title }}</strong>
+                                    <span>{{ item.minutes }} 分钟 · {{ item.status }}</span>
+                                    <p>{{ item.reason }}</p>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="muted-text">暂无已保存计划。</p>
+                        {% endif %}
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
     </div>
 </section>
 {% endblock %}

@@ -1,6 +1,16 @@
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from .ai_parser import AIParseError, parse_text_notice
+from .planner import (
+    deserialize_plan_items,
+    generate_plan,
+    get_availability,
+    get_plan_settings,
+    load_saved_plan,
+    save_plan_items,
+    save_plan_settings,
+    serialize_plan_items,
+)
 from .tasks import (
     ALLOWED_PRIORITIES,
     ALLOWED_STATUSES,
@@ -8,6 +18,7 @@ from .tasks import (
     dashboard_data,
     delete_task,
     get_task,
+    get_db,
     group_tasks_by_status,
     list_tasks,
     update_task,
@@ -210,7 +221,76 @@ def update_status_route(task_id):
 
 @main_bp.get("/plan")
 def plan():
-    return render_template("plan.html", active_page="plan")
+    db = get_db()
+    settings = get_plan_settings(db)
+    availability = get_availability(db, settings["horizon_days"])
+    saved_plan = load_saved_plan(db, settings["horizon_days"])
+    return render_template(
+        "plan.html",
+        active_page="plan",
+        settings=settings,
+        availability=availability,
+        saved_plan=saved_plan,
+        preview=None,
+        preview_payload="",
+        errors=[],
+    )
+
+
+@main_bp.post("/plan/settings")
+def save_plan_settings_route():
+    errors = save_plan_settings(get_db(), request.form)
+    if errors:
+        db = get_db()
+        settings = get_plan_settings(db)
+        availability = get_availability(db, settings["horizon_days"])
+        saved_plan = load_saved_plan(db, settings["horizon_days"])
+        return (
+            render_template(
+                "plan.html",
+                active_page="plan",
+                settings=settings,
+                availability=availability,
+                saved_plan=saved_plan,
+                preview=None,
+                preview_payload="",
+                errors=errors,
+            ),
+            400,
+        )
+    flash("可用时间和规划偏好已保存。")
+    return redirect(url_for("main.plan"))
+
+
+@main_bp.post("/plan/generate")
+def generate_plan_route():
+    db = get_db()
+    settings = get_plan_settings(db)
+    availability = get_availability(db, settings["horizon_days"])
+    tasks = list_tasks()
+    preview = generate_plan(tasks, availability, settings)
+    saved_plan = load_saved_plan(db, settings["horizon_days"])
+    return render_template(
+        "plan.html",
+        active_page="plan",
+        settings=settings,
+        availability=availability,
+        saved_plan=saved_plan,
+        preview=preview,
+        preview_payload=serialize_plan_items(preview["items"]),
+        errors=[],
+    )
+
+
+@main_bp.post("/plan/confirm")
+def confirm_plan_route():
+    items = deserialize_plan_items(request.form.get("plan_payload", ""))
+    if not items:
+        flash("没有可保存的计划项，请先生成待确认计划。")
+        return redirect(url_for("main.plan"))
+    save_plan_items(get_db(), items)
+    flash("计划已确认并保存。")
+    return redirect(url_for("main.plan"))
 
 
 @main_bp.get("/health")

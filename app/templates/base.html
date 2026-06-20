@@ -23,16 +23,16 @@
                 <a href="{{ url_for('main.task_center') }}" class="{{ 'is-active' if active_page == 'tasks' else '' }}">任务中心</a>
                 <a href="{{ url_for('main.plan') }}" class="{{ 'is-active' if active_page == 'plan' else '' }}">智能计划</a>
             </nav>
-            <p class="sidebar-note">阶段2已接入SQLite任务管理。AI识别、文件解析和自动规划暂未接入。</p>
+            <p class="sidebar-note">阶段4已接入任务拆解和规则规划。文件解析、提醒和动态重规划暂未接入。</p>
         </aside>
 
         <div class="workspace">
             <header class="topbar">
                 <div>
-                    <p class="eyebrow">阶段2</p>
+                    <p class="eyebrow">阶段4</p>
                     <h1>{% block page_title %}{% endblock %}</h1>
                 </div>
-                <span class="status-tag is-good">SQLite已接入</span>
+                <span class="status-tag is-good">规则规划已接入</span>
             </header>
             <main>
                 {% with messages = get_flashed_messages() %}

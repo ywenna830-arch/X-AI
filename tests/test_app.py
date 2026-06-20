@@ -1,5 +1,8 @@
+from datetime import date, datetime, timedelta
+
 from app import create_app
 from app.ai_parser import AIParseError, parse_model_json, parse_text_notice
+from app.planner import generate_plan
 
 
 def make_app(tmp_path, extra_config=None):
@@ -179,6 +182,96 @@ def test_health_check_returns_ok():
     assert response.get_json() == {"status": "ok", "service": "课迹"}
 
 
+def test_planner_orders_multiple_tasks_by_deadline():
+    today = date.today()
+    settings = {"horizon_days": 7, "finish_early_days": 0, "weekend_extra": 0}
+    availability = _availability(today, [120, 120, 120, 120, 120, 120, 120])
+    tasks = [
+        _planner_task(1, "期末论文", "课程论文", today + timedelta(days=5), 180, "中"),
+        _planner_task(2, "算法练习", "日常练习", today + timedelta(days=2), 80, "高"),
+    ]
+
+    plan = generate_plan(tasks, availability, settings, today=today)
+    items = plan["items"]
+
+    assert items
+    assert items[0]["task_id"] == 2
+    assert all(date.fromisoformat(item["scheduled_date"]) <= today + timedelta(days=5) for item in items)
+    assert any("优先级高" in item["reason"] for item in items if item["task_id"] == 2)
+
+
+def test_planner_spreads_large_task_across_days():
+    today = date.today()
+    settings = {"horizon_days": 7, "finish_early_days": 0, "weekend_extra": 0}
+    availability = _availability(today, [120, 120, 120, 120, 120, 120, 120])
+    task = _planner_task(1, "编程大作业", "编程作业", today + timedelta(days=4), 260, "高")
+
+    plan = generate_plan([task], availability, settings, today=today)
+    scheduled_dates = {item["scheduled_date"] for item in plan["items"]}
+
+    assert len(scheduled_dates) > 1
+    assert all(day["scheduled_minutes"] <= day["capacity_minutes"] for day in plan["days"])
+
+
+def test_planner_warns_when_capacity_is_not_enough():
+    today = date.today()
+    settings = {"horizon_days": 2, "finish_early_days": 0, "weekend_extra": 0}
+    availability = _availability(today, [30, 30])
+    task = _planner_task(1, "考试复习", "考试复习", today + timedelta(days=1), 300, "高")
+
+    plan = generate_plan([task], availability, settings, today=today)
+
+    assert any("超出当前可用容量" in warning for warning in plan["warnings"])
+
+
+def test_planner_respects_blocked_day():
+    today = date.today()
+    settings = {"horizon_days": 4, "finish_early_days": 0, "weekend_extra": 0}
+    availability = _availability(today, [120, 120, 120, 120], blocked_indexes={0})
+    task = _planner_task(1, "PPT展示", "PPT展示", today + timedelta(days=3), 120, "中")
+
+    plan = generate_plan([task], availability, settings, today=today)
+
+    assert plan["days"][0]["items"] == []
+    assert all(item["scheduled_date"] != today.isoformat() for item in plan["items"])
+
+
+def test_plan_page_generates_preview_and_saves_confirmed_items(tmp_path):
+    app = make_app(tmp_path)
+    deadline = (date.today() + timedelta(days=3)).strftime("%Y-%m-%dT20:00")
+
+    with app.test_client() as client:
+        create_response = client.post(
+            "/tasks",
+            data={
+                "course_name": "软件工程",
+                "title": "编程作业",
+                "task_type": "编程作业",
+                "description": "实现并测试功能",
+                "deadline": deadline,
+                "estimated_minutes": "120",
+                "priority": "高",
+                "status": "未开始",
+            },
+        )
+        assert create_response.status_code == 302
+
+        preview_response = client.post("/plan/generate")
+        payload = _extract_plan_payload(preview_response.data.decode("utf-8"))
+        save_response = client.post(
+            "/plan/confirm",
+            data={"plan_payload": payload},
+            follow_redirects=True,
+        )
+
+    assert preview_response.status_code == 200
+    assert "待确认计划".encode("utf-8") in preview_response.data
+    assert "安排原因".encode("utf-8") not in preview_response.data
+    assert save_response.status_code == 200
+    assert "计划已确认并保存".encode("utf-8") in save_response.data
+    assert "编程作业".encode("utf-8") in save_response.data
+
+
 def test_task_crud_status_filter_and_persistence(tmp_path):
     db_path = tmp_path / "tasks.sqlite3"
     app = create_app({"TESTING": True, "DATABASE": str(db_path)})
@@ -276,3 +369,38 @@ def test_task_validation_rejects_invalid_inputs(tmp_path):
     assert "预计时长必须为非负整数".encode("utf-8") in response.data
     assert "任务状态无效".encode("utf-8") in response.data
     assert "优先级无效".encode("utf-8") in response.data
+
+
+def _planner_task(task_id, title, task_type, deadline_day, minutes, priority, status="未开始"):
+    deadline_dt = datetime.combine(deadline_day, datetime.min.time()).replace(hour=20)
+    return {
+        "id": task_id,
+        "title": title,
+        "task_type": task_type,
+        "description": title,
+        "deadline": deadline_dt.strftime("%Y-%m-%dT%H:%M"),
+        "deadline_dt": deadline_dt,
+        "estimated_minutes": minutes,
+        "priority": priority,
+        "status": status,
+    }
+
+
+def _availability(start_day, minutes_by_day, blocked_indexes=None):
+    blocked_indexes = blocked_indexes or set()
+    return [
+        {
+            "date": (start_day + timedelta(days=index)).isoformat(),
+            "label": str(index),
+            "available_minutes": minutes,
+            "is_blocked": 1 if index in blocked_indexes else 0,
+        }
+        for index, minutes in enumerate(minutes_by_day)
+    ]
+
+
+def _extract_plan_payload(html):
+    marker = 'name="plan_payload" value="'
+    start = html.index(marker) + len(marker)
+    end = html.index('"', start)
+    return html[start:end].replace("&#34;", '"')

@@ -25,10 +25,14 @@ def create_app(test_config=None):
 
     os.makedirs(app.instance_path, exist_ok=True)
 
-    from .tasks import close_db, init_db
+    from .planner import init_plan_db
+    from .tasks import close_db, get_db, init_db
 
-    init_db(app)
     app.teardown_appcontext(close_db)
+    init_db(app)
+    with app.app_context():
+        init_plan_db(get_db())
+        get_db().commit()
 
     from .routes import main_bp
 
