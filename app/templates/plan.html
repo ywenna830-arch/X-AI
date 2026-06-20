@@ -101,7 +101,6 @@
                     {% endfor %}
                 </div>
                 <form method="post" action="{{ url_for('main.confirm_plan_route') }}">
-                    <input type="hidden" name="plan_payload" value="{{ preview_payload }}">
                     <button class="button" type="submit">确认并保存计划</button>
                 </form>
             </section>

@@ -1,4 +1,3 @@
-import json
 from datetime import date, datetime, timedelta
 
 from .tasks import format_deadline, parse_deadline
@@ -200,36 +199,6 @@ def generate_plan(tasks, availability, settings, today=None):
             warnings.append(f"{task['title']} 仍有 {unscheduled} 分钟超出当前可用容量。")
 
     return {"days": days, "warnings": warnings, "items": _flatten_items(day_map)}
-
-
-def serialize_plan_items(items):
-    return json.dumps(items, ensure_ascii=False)
-
-
-def deserialize_plan_items(payload):
-    try:
-        items = json.loads(payload)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(items, list):
-        return []
-    safe_items = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        try:
-            safe_items.append(
-                {
-                    "task_id": int(item["task_id"]),
-                    "scheduled_date": str(item["scheduled_date"]),
-                    "title": str(item["title"]).strip(),
-                    "minutes": int(item["minutes"]),
-                    "reason": str(item["reason"]).strip(),
-                }
-            )
-        except (KeyError, TypeError, ValueError):
-            continue
-    return [item for item in safe_items if item["title"] and item["minutes"] > 0]
 
 
 def save_plan_items(db, items):

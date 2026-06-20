@@ -2,14 +2,12 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 
 from .ai_parser import AIParseError, parse_text_notice
 from .planner import (
-    deserialize_plan_items,
     generate_plan,
     get_availability,
     get_plan_settings,
     load_saved_plan,
     save_plan_items,
     save_plan_settings,
-    serialize_plan_items,
 )
 from .tasks import (
     ALLOWED_PRIORITIES,
@@ -232,7 +230,6 @@ def plan():
         availability=availability,
         saved_plan=saved_plan,
         preview=None,
-        preview_payload="",
         errors=[],
     )
 
@@ -253,7 +250,6 @@ def save_plan_settings_route():
                 availability=availability,
                 saved_plan=saved_plan,
                 preview=None,
-                preview_payload="",
                 errors=errors,
             ),
             400,
@@ -277,18 +273,21 @@ def generate_plan_route():
         availability=availability,
         saved_plan=saved_plan,
         preview=preview,
-        preview_payload=serialize_plan_items(preview["items"]),
         errors=[],
     )
 
 
 @main_bp.post("/plan/confirm")
 def confirm_plan_route():
-    items = deserialize_plan_items(request.form.get("plan_payload", ""))
+    db = get_db()
+    settings = get_plan_settings(db)
+    availability = get_availability(db, settings["horizon_days"])
+    preview = generate_plan(list_tasks(), availability, settings)
+    items = preview["items"]
     if not items:
         flash("没有可保存的计划项，请先生成待确认计划。")
         return redirect(url_for("main.plan"))
-    save_plan_items(get_db(), items)
+    save_plan_items(db, items)
     flash("计划已确认并保存。")
     return redirect(url_for("main.plan"))
 

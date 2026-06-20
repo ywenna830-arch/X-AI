@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from app import create_app
 from app.ai_parser import AIParseError, parse_model_json, parse_text_notice
 from app.planner import generate_plan
+from app.tasks import get_db
 
 
 def make_app(tmp_path, extra_config=None):
@@ -257,19 +258,63 @@ def test_plan_page_generates_preview_and_saves_confirmed_items(tmp_path):
         assert create_response.status_code == 302
 
         preview_response = client.post("/plan/generate")
-        payload = _extract_plan_payload(preview_response.data.decode("utf-8"))
         save_response = client.post(
             "/plan/confirm",
-            data={"plan_payload": payload},
             follow_redirects=True,
         )
 
     assert preview_response.status_code == 200
     assert "待确认计划".encode("utf-8") in preview_response.data
+    assert b"plan_payload" not in preview_response.data
     assert "安排原因".encode("utf-8") not in preview_response.data
     assert save_response.status_code == 200
     assert "计划已确认并保存".encode("utf-8") in save_response.data
     assert "编程作业".encode("utf-8") in save_response.data
+
+
+def test_plan_confirm_ignores_forged_payload_and_saves_server_plan(tmp_path):
+    app = make_app(tmp_path)
+    deadline_day = date.today() + timedelta(days=3)
+    deadline = deadline_day.strftime("%Y-%m-%dT20:00")
+
+    with app.test_client() as client:
+        create_response = client.post(
+            "/tasks",
+            data={
+                "course_name": "软件工程",
+                "title": "安全修复作业",
+                "task_type": "编程作业",
+                "description": "修复确认流程",
+                "deadline": deadline,
+                "estimated_minutes": "120",
+                "priority": "高",
+                "status": "未开始",
+            },
+        )
+        task_id = int(create_response.headers["Location"].rsplit("/", 1)[-1])
+        forged_payload = (
+            '[{"task_id":999999,"scheduled_date":"2099-12-31",'
+            '"title":"伪造计划","minutes":999999,"reason":"篡改"}]'
+        )
+
+        save_response = client.post(
+            "/plan/confirm",
+            data={"plan_payload": forged_payload},
+            follow_redirects=True,
+        )
+
+    with app.app_context():
+        rows = get_db().execute(
+            "SELECT task_id, scheduled_date, title, minutes, reason FROM plan_items"
+        ).fetchall()
+
+    assert save_response.status_code == 200
+    assert rows
+    assert all(row["task_id"] == task_id for row in rows)
+    assert all(row["minutes"] < 999999 for row in rows)
+    assert all(row["title"] != "伪造计划" for row in rows)
+    assert all(date.fromisoformat(row["scheduled_date"]) <= deadline_day for row in rows)
+    assert any("每日最多占用80%可用时间" in row["reason"] for row in rows)
 
 
 def test_task_crud_status_filter_and_persistence(tmp_path):
@@ -397,10 +442,3 @@ def _availability(start_day, minutes_by_day, blocked_indexes=None):
         }
         for index, minutes in enumerate(minutes_by_day)
     ]
-
-
-def _extract_plan_payload(html):
-    marker = 'name="plan_payload" value="'
-    start = html.index(marker) + len(marker)
-    end = html.index('"', start)
-    return html[start:end].replace("&#34;", '"')
