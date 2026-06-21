@@ -249,6 +249,9 @@ def export_task_calendar(task_id):
     if task is None:
         abort(404)
     ics = build_task_ics(get_db(), [task])
+    if ics is None:
+        flash("此任务没有可导出的日历事件：没有未完成计划项，也没有有效截止时间。")
+        return redirect(url_for("main.task_detail", task_id=task_id))
     return _ics_response(ics, f"task-{task_id}.ics")
 
 
@@ -259,6 +262,9 @@ def export_all_tasks_calendar():
     ).fetchall()
     tasks = decorated_task_rows(rows)
     ics = build_task_ics(get_db(), tasks)
+    if ics is None:
+        flash("当前没有可导出的日历事件：无有效截止时间且无未完成计划项的任务已跳过。")
+        return redirect(url_for("main.index"))
     return _ics_response(ics, "unfinished-tasks.ics")
 
 

@@ -1,15 +1,12 @@
 from datetime import date, datetime, time, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-from flask import current_app
 
 from .planner import generate_plan, get_availability, get_plan_settings
+from .time_utils import app_aware_now, app_now, app_timezone, app_timezone_name, to_app_time
 from .tasks import DATE_FORMAT, decorate_task, format_deadline, list_tasks, parse_deadline
 
 
 PRESET_REMINDER_DAYS = (7, 3, 1, 0)
 DEFAULT_UPCOMING_DAYS = 7
-DEFAULT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_PLAN_START = time(9, 0)
 DEFAULT_DEADLINE_TIME = time(23, 59)
 DEFAULT_EVENT_MINUTES = 30
@@ -84,8 +81,8 @@ def mark_reminder_read(db, reminder_id):
 
 
 def dashboard_data(db, now=None):
-    now = now or datetime.now()
-    tasks = list_tasks()
+    now = to_app_time(now) if now is not None else app_now()
+    tasks = [_with_overdue(task, now) for task in list_tasks()]
     active_tasks = [task for task in tasks if task["status"] != "已完成"]
     today = now.date()
     tomorrow = today + timedelta(days=1)
@@ -118,7 +115,7 @@ def dashboard_data(db, now=None):
 def countdown_label(deadline_dt, now=None):
     if deadline_dt is None:
         return "未设置截止时间"
-    now = now or datetime.now()
+    now = to_app_time(now) if now is not None else app_now()
     if deadline_dt.date() == now.date() and deadline_dt >= now:
         return f"今天{deadline_dt.strftime('%H:%M')}截止"
     if deadline_dt < now:
@@ -136,9 +133,9 @@ def countdown_label(deadline_dt, now=None):
 
 
 def build_task_ics(db, tasks, now=None):
-    now = now or datetime.now(timezone.utc)
-    tz_name = current_app.config.get("APP_TIMEZONE", DEFAULT_TIMEZONE)
-    tz = _load_timezone(tz_name)
+    now = now or app_aware_now()
+    tz_name = app_timezone_name()
+    tz = app_timezone(tz_name)
     events = []
     for task in tasks:
         if task["status"] == "已完成":
@@ -149,7 +146,12 @@ def build_task_ics(db, tasks, now=None):
             for item in plan_items:
                 events.append(_event_for_plan_item(task, item, reminders, now, tz_name, tz))
         else:
-            events.append(_event_for_task_deadline(task, reminders, now, tz_name, tz))
+            event = _event_for_task_deadline(task, reminders, now, tz_name, tz)
+            if event:
+                events.append(event)
+
+    if not events:
+        return None
 
     lines = [
         "BEGIN:VCALENDAR",
@@ -264,6 +266,7 @@ def _plan_items_for_task(db, task_id):
         """
         SELECT * FROM plan_items
         WHERE task_id = ?
+          AND status != '已完成'
         ORDER BY scheduled_date ASC, id ASC
         """,
         (task_id,),
@@ -278,6 +281,17 @@ def _max_reminder_days(db):
 
 def _with_countdown(task, now):
     return {**task, "countdown": countdown_label(task["deadline_dt"], now)}
+
+
+def _with_overdue(task, now):
+    return {
+        **task,
+        "is_overdue": (
+            task["deadline_dt"] is not None
+            and task["deadline_dt"] < now
+            and task["status"] != "已完成"
+        ),
+    }
 
 
 def _event_for_plan_item(task, item, reminders, now, tz_name, tz):
@@ -299,6 +313,8 @@ def _event_for_plan_item(task, item, reminders, now, tz_name, tz):
 
 def _event_for_task_deadline(task, reminders, now, tz_name, tz):
     deadline_dt = _deadline_for_ics(task["deadline"], tz)
+    if deadline_dt is None:
+        return None
     end = deadline_dt + timedelta(minutes=DEFAULT_EVENT_MINUTES)
     description = _task_description(task, "未生成计划项，事件时间使用任务截止时间。")
     return _event_lines(
@@ -361,17 +377,8 @@ def _deadline_for_ics(value, tz):
     try:
         deadline_date = date.fromisoformat(value)
     except ValueError:
-        deadline_date = date.today()
+        return None
     return datetime.combine(deadline_date, DEFAULT_DEADLINE_TIME, tz)
-
-
-def _load_timezone(tz_name):
-    try:
-        return ZoneInfo(tz_name)
-    except ZoneInfoNotFoundError:
-        if tz_name == DEFAULT_TIMEZONE:
-            return timezone(timedelta(hours=8), tz_name)
-        return timezone.utc
 
 
 def _format_local(value):
@@ -417,4 +424,4 @@ def _byte_split_index(text, limit):
 
 
 def _now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return app_now().strftime("%Y-%m-%d %H:%M:%S")

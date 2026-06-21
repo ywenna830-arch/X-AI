@@ -2,7 +2,7 @@ import io
 import sys
 import types
 import zipfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from app import create_app
 from app.ai_parser import AIParseError, parse_model_json, parse_text_notice
@@ -675,6 +675,33 @@ def test_dashboard_classifies_today_tomorrow_upcoming_overdue_and_plan_items(tmp
     assert any(task["title"] == "已逾期任务" for task in data["overdue_tasks"])
 
 
+def test_dashboard_uses_app_timezone_for_classification_reminders_and_countdown(tmp_path):
+    app = make_app(tmp_path, {"APP_TIMEZONE": "UTC"})
+    now = datetime(2026, 6, 20, 16, 30, tzinfo=timezone.utc)
+
+    with app.app_context():
+        db = get_db()
+        today_id = _insert_task(db, "应用时区今日任务", "2026-06-20T18:00")
+        tomorrow_id = _insert_task(db, "应用时区明日任务", "2026-06-21T00:15")
+        _insert_task(db, "应用时区逾期任务", "2026-06-19T23:59")
+        _insert_plan_item(db, today_id, date(2026, 6, 20), "应用时区今日计划项", 45)
+        _insert_plan_item(db, tomorrow_id, date(2026, 6, 21), "应用时区明日计划项", 30)
+        db.execute(
+            "INSERT INTO task_reminders (task_id, days_before, created_at, updated_at) VALUES (?, 1, 'now', 'now')",
+            (tomorrow_id,),
+        )
+        db.commit()
+        data = reminder_dashboard_data(db, now=now)
+
+    assert {task["title"] for task in data["today_tasks"]} == {"应用时区今日任务"}
+    assert {task["title"] for task in data["tomorrow_tasks"]} == {"应用时区明日任务"}
+    assert {item["title"] for item in data["today_plan_items"]} == {"应用时区今日计划项"}
+    assert {item["title"] for item in data["tomorrow_plan_items"]} == {"应用时区明日计划项"}
+    assert {reminder["title"] for reminder in data["reminders"]} == {"应用时区明日任务"}
+    assert data["today_tasks"][0]["countdown"] == "今天18:00截止"
+    assert {task["title"] for task in data["overdue_tasks"]} == {"应用时区逾期任务"}
+
+
 def test_completed_tasks_do_not_create_active_reminders(tmp_path):
     app = make_app(tmp_path)
     today = date.today()
@@ -803,6 +830,24 @@ def test_single_task_ics_export_contains_required_fields_and_alarm(tmp_path):
     assert "TRIGGER:-P1D" in data
 
 
+def test_single_task_ics_export_without_deadline_or_plan_shows_message(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.app_context():
+        task_id = _insert_task(get_db(), "无截止无计划任务", "")
+
+    with app.test_client() as client:
+        response = client.get(f"/tasks/{task_id}/calendar.ics", follow_redirects=True)
+
+    data = response.data.decode("utf-8")
+
+    assert response.status_code == 200
+    assert not response.headers["Content-Type"].startswith("text/calendar")
+    assert "没有未完成计划项，也没有有效截止时间" in data
+    assert "DTSTART" not in data
+    assert date.today().strftime("%Y%m%dT235900") not in data
+
+
 def test_all_tasks_ics_export_excludes_completed_tasks_by_default(tmp_path):
     app = make_app(tmp_path)
 
@@ -818,6 +863,42 @@ def test_all_tasks_ics_export_excludes_completed_tasks_by_default(tmp_path):
     assert "未完成导出任务" in data
     assert "已完成导出任务" not in data
     assert f"task-{completed_id}" not in data
+
+
+def test_all_tasks_ics_skips_tasks_without_deadline_or_plan(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.app_context():
+        db = get_db()
+        _insert_task(db, "批量跳过无日期任务", "")
+        _insert_task(db, "批量保留有效任务", "2099-06-20T20:00")
+
+    with app.test_client() as client:
+        response = client.get("/calendar/tasks.ics")
+
+    data = response.data.decode("utf-8")
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/calendar")
+    assert "批量保留有效任务" in data
+    assert "批量跳过无日期任务" not in data
+
+
+def test_all_tasks_ics_without_exportable_events_shows_message(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.app_context():
+        _insert_task(get_db(), "批量无有效事件任务", "")
+
+    with app.test_client() as client:
+        response = client.get("/calendar/tasks.ics", follow_redirects=True)
+
+    data = response.data.decode("utf-8")
+
+    assert response.status_code == 200
+    assert not response.headers["Content-Type"].startswith("text/calendar")
+    assert "当前没有可导出的日历事件" in data
+    assert "DTSTART" not in data
 
 
 def test_ics_escapes_chinese_punctuation_backslash_and_newlines(tmp_path):
@@ -879,6 +960,80 @@ def test_plan_item_ics_uses_default_start_and_plan_minutes(tmp_path):
 
     assert f"DTSTART;TZID=Asia/Shanghai:{start_text}" in data
     assert f"DTEND;TZID=Asia/Shanghai:{end_text}" in data
+
+
+def test_ics_excludes_completed_plan_items_but_keeps_deadline_event(tmp_path):
+    app = make_app(tmp_path)
+    scheduled_day = date(2099, 6, 19)
+
+    with app.app_context():
+        db = get_db()
+        task_id = _insert_task(db, "已完成计划项导出任务", "2099-06-20T20:00")
+        completed_item_id = _insert_plan_item(
+            db,
+            task_id,
+            scheduled_day,
+            "已完成计划项不应导出",
+            45,
+            status="已完成",
+        )
+
+    with app.test_client() as client:
+        response = client.get(f"/tasks/{task_id}/calendar.ics")
+
+    data = _unfold_ics(response.data.decode("utf-8"))
+
+    assert response.status_code == 200
+    assert f"task-{task_id}-plan-{completed_item_id}@keji" not in data
+    assert "已完成计划项不应导出" not in data
+    assert f"UID:task-{task_id}@keji" in data
+    assert "DTSTART;TZID=Asia/Shanghai:20990620T200000" in data
+
+
+def test_ics_includes_incomplete_plan_items(tmp_path):
+    app = make_app(tmp_path)
+    scheduled_day = date(2099, 6, 19)
+
+    with app.app_context():
+        db = get_db()
+        task_id = _insert_task(db, "未完成计划项导出任务", "2099-06-20T20:00")
+        item_id = _insert_plan_item(
+            db,
+            task_id,
+            scheduled_day,
+            "未完成计划项仍导出",
+            45,
+            status="未完成",
+        )
+
+    with app.test_client() as client:
+        response = client.get(f"/tasks/{task_id}/calendar.ics")
+
+    data = _unfold_ics(response.data.decode("utf-8"))
+
+    assert response.status_code == 200
+    assert f"UID:task-{task_id}-plan-{item_id}@keji" in data
+    assert "未完成计划项仍导出" in data
+    assert "DTSTART;TZID=Asia/Shanghai:20990619T090000" in data
+
+
+def test_delete_task_cleans_task_reminders(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        task_id = _create_task(client, "删除提醒清理任务", "2099-06-20T20:00")
+        client.post(f"/tasks/{task_id}/reminders", data={"reminder_days": ["7", "1"]})
+        response = client.post(f"/tasks/{task_id}/delete", follow_redirects=True)
+
+    with app.app_context():
+        count = get_db().execute(
+            "SELECT COUNT(*) AS count FROM task_reminders WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()["count"]
+
+    assert response.status_code == 200
+    assert "任务已删除".encode("utf-8") in response.data
+    assert count == 0
 
 
 def test_task_crud_status_filter_and_persistence(tmp_path):
@@ -1026,16 +1181,16 @@ def _insert_task(
     return cursor.lastrowid
 
 
-def _insert_plan_item(db, task_id, scheduled_day, title, minutes):
+def _insert_plan_item(db, task_id, scheduled_day, title, minutes, status="未开始"):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cursor = db.execute(
         """
         INSERT INTO plan_items (
             task_id, scheduled_date, title, minutes, reason, status, created_at
         )
-        VALUES (?, ?, ?, ?, '测试计划项', '未开始', ?)
+        VALUES (?, ?, ?, ?, '测试计划项', ?, ?)
         """,
-        (task_id, scheduled_day.isoformat(), title, minutes, now),
+        (task_id, scheduled_day.isoformat(), title, minutes, status, now),
     )
     db.commit()
     return cursor.lastrowid

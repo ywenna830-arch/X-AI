@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 
 from flask import current_app, g
 
+from .time_utils import app_now
+
 
 ALLOWED_STATUSES = ("未开始", "进行中", "待提交", "已完成")
 ALLOWED_PRIORITIES = ("低", "中", "高")
@@ -239,7 +241,7 @@ def list_tasks(filters=None):
         values.append(priority)
 
     deadline = filters.get("deadline", "").strip()
-    now = datetime.now()
+    now = app_now()
     if deadline == "today":
         clauses.append("deadline >= ? AND deadline <= ?")
         values.extend(
@@ -265,7 +267,7 @@ def list_tasks(filters=None):
 
 def dashboard_data():
     tasks = list_tasks()
-    now = datetime.now()
+    now = app_now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = now.replace(hour=23, minute=59, second=0, microsecond=0)
     upcoming_end = now + timedelta(days=7)
@@ -309,7 +311,7 @@ def decorate_task(row):
     task["deadline_label"] = format_deadline(deadline_dt)
     task["is_overdue"] = (
         deadline_dt is not None
-        and deadline_dt < datetime.now()
+        and deadline_dt < app_now()
         and task["status"] != "已完成"
     )
     return task
@@ -331,7 +333,7 @@ def format_deadline(value):
 
 
 def _now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return app_now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _ensure_task_columns(db):
