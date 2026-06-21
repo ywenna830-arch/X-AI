@@ -26,3 +26,7 @@ task-import-*/
 Thumbs.db
 .vscode/
 .idea/
+
+# Generated exports and logs
+*.ics
+*.log
