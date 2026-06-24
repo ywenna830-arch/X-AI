@@ -25,6 +25,30 @@ AI_FIELDS = (
 )
 ALLOWED_TASK_TYPES = ("作业", "实验", "阅读", "小论文", "考试", "项目", "其他", "")
 ALLOWED_CONFIDENCE = ("原文明确", "AI推断", "信息缺失", "本地演示")
+CHAT_SYSTEM_PROMPT = """
+你是“课迹”学习任务助手，面向大学生使用。
+你的职责分为两类：
+一、普通对话：当用户进行问候、感谢、询问功能、询问使用方式、表达学习压力，或进行与学习任务相关的普通交流时，自然、简短地回答。普通对话不能生成任务，不能保存任务，不能虚构任务字段。
+二、任务识别：当用户提供作业、考试、实验、论文、报告、项目、阅读、复习、课程通知、截止时间、提交要求、材料要求等信息时，判断为任务，并提取结构化字段。
+你必须只返回合法 JSON，不要返回 Markdown，不要返回 JSON 外的解释。
+普通对话格式：
+{"type":"chat","reply":"给用户的自然回复"}
+任务信息格式：
+{"type":"task","reply":"给用户的简短说明","task":{"course_name":"","title":"","task_type":"","deadline":"","description":"","submission_requirements":"","required_materials":[],"suggested_materials":[],"estimated_minutes":0,"priority":"中","source_quote":"","confidence":"原文明确","uncertain_fields":[]}}
+规则：
+- “你好”“谢谢”“你是谁”“你能做什么”“怎么使用”属于普通对话。
+- 不要把普通聊天误判为任务。
+- 任务信息不完整时，字段可以为空，并把字段名写入 uncertain_fields。
+- 截止日期不明确时不要猜测。
+- 只有用户提供通知日期时，才可以推算“下周三”等相对日期。
+- task_type 只能是：作业、实验、阅读、小论文、考试、项目、其他、空字符串。
+- priority 只能是：低、中、高。
+- confidence 只能是：原文明确、AI推断、信息缺失。
+- required_materials、suggested_materials、uncertain_fields 必须是字符串数组。
+- estimated_minutes 必须是非负整数。
+- 不得直接保存任务，不得声称已保存任务。
+- 回复要自然、简短，不要使用宣传口吻。
+""".strip()
 
 
 class AIParseError(Exception):
@@ -56,12 +80,58 @@ def parse_text_notice(notice_text, notice_date=""):
     }
 
 
+def parse_chat_message(message, notice_date=""):
+    message = (message or "").strip()
+    notice_date = (notice_date or "").strip()
+    if not message:
+        raise AIParseError("消息不能为空。")
+
+    if current_app.config.get("AI_DEMO_MODE") or not current_app.config.get("AI_API_KEY"):
+        return _demo_chat(message, notice_date)
+
+    content = _call_chat_model(message, notice_date)
+    return parse_chat_model_json(content)
+
+
 def parse_model_json(content):
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as exc:
         raise AIParseError("AI返回内容不是合法JSON，请重试。") from exc
     return validate_ai_payload(payload)
+
+
+def parse_chat_model_json(content):
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise AIParseError("AI返回内容不是合法JSON，请重试。") from exc
+    if not isinstance(payload, dict):
+        raise AIParseError("AI返回JSON必须是对象。")
+
+    message_type = payload.get("type")
+    reply = payload.get("reply", "")
+    if message_type not in ("chat", "task"):
+        raise AIParseError("AI返回type必须是chat或task。")
+    if not isinstance(reply, str) or not reply.strip():
+        raise AIParseError("AI返回reply必须是非空字符串。")
+
+    if message_type == "chat":
+        return {"type": "chat", "reply": reply.strip()}
+
+    task_payload = payload.get("task")
+    if not isinstance(task_payload, dict):
+        raise AIParseError("AI返回task必须是对象。")
+    data = validate_ai_payload(task_payload)
+    return {
+        "type": "task",
+        "reply": reply.strip(),
+        "result": {
+            "data": data,
+            "mode": "ai",
+            "reply": reply.strip(),
+        },
+    }
 
 
 def validate_ai_payload(payload):
@@ -174,6 +244,94 @@ def _call_model(notice_text, notice_date):
         return response_payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise AIParseError("AI接口响应缺少模型输出内容。") from exc
+
+
+def _call_chat_model(message, notice_date):
+    api_base_url = current_app.config.get("AI_API_BASE_URL")
+    model = current_app.config.get("AI_MODEL")
+    if not api_base_url or not model:
+        raise AIParseError("AI接口地址或模型未配置，请检查 .env。")
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "notice_date": notice_date,
+                        "message": message,
+                        "required_task_fields": AI_FIELDS,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    req = request.Request(
+        api_base_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {current_app.config['AI_API_KEY']}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=current_app.config.get("AI_TIMEOUT", 20)) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except error.URLError as exc:
+        raise AIParseError("AI接口请求失败，请稍后重试。") from exc
+    except TimeoutError as exc:
+        raise AIParseError("AI接口请求超时，请稍后重试。") from exc
+    except json.JSONDecodeError as exc:
+        raise AIParseError("AI接口响应不是合法JSON。") from exc
+
+    try:
+        return response_payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise AIParseError("AI接口响应缺少模型输出内容。") from exc
+
+
+def _demo_chat(message, notice_date):
+    if not _looks_like_task(message):
+        return {
+            "type": "chat",
+            "reply": "你好，我可以帮你整理课程通知、作业和考试，也可以把确认后的任务用于学习计划。",
+        }
+    data = _demo_parse(message, notice_date)
+    return {
+        "type": "task",
+        "reply": "我先用本地演示模式整理出一份任务草稿，请你确认。",
+        "result": {
+            "data": data,
+            "mode": "demo",
+            "reply": "我先用本地演示模式整理出一份任务草稿，请你确认。",
+        },
+    }
+
+
+def _looks_like_task(text):
+    task_keywords = (
+        "课程",
+        "作业",
+        "考试",
+        "实验",
+        "论文",
+        "报告",
+        "项目",
+        "阅读",
+        "复习",
+        "提交",
+        "上传",
+        "截止",
+        "ddl",
+        "deadline",
+    )
+    return any(keyword in text for keyword in task_keywords)
 
 
 def _demo_parse(notice_text, notice_date):

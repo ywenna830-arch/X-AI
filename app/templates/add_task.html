@@ -1,111 +1,107 @@
 {% extends "base.html" %}
 
-{% block title %}课迹 - 添加任务{% endblock %}
-{% block page_title %}添加任务{% endblock %}
+{% block title %}课迹 - 课迹助手{% endblock %}
+{% block page_title %}课迹助手{% endblock %}
 
 {% block content %}
-<section class="entry-layout">
-    <article class="panel assistant-panel">
-        <div class="section-heading">
-            <h2>对话式录入</h2>
-            <span class="status-tag is-good">文字解析已接入</span>
+<section class="chat-page">
+    <header class="chat-header">
+        <div>
+            <h2>课迹助手</h2>
+            <p>帮你整理课程通知、任务与截止时间。</p>
         </div>
+    </header>
 
-        <div class="chat-window" aria-label="对话消息区域">
-            <div class="chat-message is-ai">
-                <div class="chat-avatar" aria-hidden="true">AI</div>
-                <div class="chat-bubble">
-                    <p>把老师的文字通知粘贴给我，我会整理成待确认的任务卡片。</p>
-                    <small>可粘贴文字，也可从“+”上传图片、DOCX或PDF提取文字后再解析。</small>
-                </div>
-            </div>
+    {% if parse_errors %}
+        <ul class="error-list">
+            {% for error in parse_errors %}
+                <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
 
-            <div class="structured-note">
-                <strong>确认后再保存</strong>
-                <ol>
-                    <li>识别课程、任务名称、截止时间、提交要求和材料。</li>
-                    <li>标出原文明确、AI推断和信息缺失的字段。</li>
-                    <li>进入确认页，由你修改后再保存为正式任务。</li>
-                </ol>
-                <p>AI解析结果不会直接写入数据库。</p>
+    {% if imported_file %}
+        <div class="import-preview" data-import-preview>
+            <strong>{{ imported_file.source_type }}文字已提取</strong>
+            <span>{{ imported_file.source_type }}{% if imported_file.source_pages %} · {{ imported_file.source_pages }}{% endif %}</span>
+            <p>已从 {{ imported_file.source_filename }} 提取文字，请检查后发送。</p>
+        </div>
+    {% endif %}
+
+    <div class="chat-thread" data-chat-thread aria-live="polite" aria-label="对话消息区域">
+        <div class="chat-message assistant-message">
+            <div class="message-content">
+                <p>你好，我可以帮你整理课程通知、作业和考试安排。</p>
+                <p>直接发送文字，也可以先上传图片、DOCX 或 PDF 提取文字。</p>
             </div>
         </div>
+    </div>
 
-        {% if parse_errors %}
-            <ul class="error-list">
-                {% for error in parse_errors %}
-                    <li>{{ error }}</li>
-                {% endfor %}
-            </ul>
-        {% endif %}
-
-        {% if imported_file %}
-            <div class="import-preview">
-                <strong>{{ imported_file.source_type }}文字已提取</strong>
-                <span>{{ imported_file.source_filename }}{% if imported_file.source_pages %} · {{ imported_file.source_pages }}{% endif %}</span>
-                <p>请先检查并修改下方原文，再点击“解析文字”。上传文件已临时清理，不会长期保存。</p>
+    <div class="chat-composer-shell">
+        <details class="attachment-picker">
+            <summary aria-label="打开附件入口">+</summary>
+            <div class="attachment-menu">
+                <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
+                    <label>
+                        上传图片
+                        <input type="file" name="attachment" accept=".png,.jpg,.jpeg" required>
+                        <span>支持 PNG、JPG、JPEG。</span>
+                    </label>
+                    <button class="button secondary small-button" type="submit">提取图片文字</button>
+                </form>
+                <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
+                    <label>
+                        上传Word
+                        <input type="file" name="attachment" accept=".docx" required>
+                        <span>仅支持DOCX。</span>
+                    </label>
+                    <button class="button secondary small-button" type="submit">提取 Word 文字</button>
+                </form>
+                <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
+                    <label>
+                        上传PDF
+                        <input type="file" name="attachment" accept=".pdf" required>
+                        <span>支持文本型 PDF。</span>
+                    </label>
+                    <button class="button secondary small-button" type="submit">提取 PDF 文字</button>
+                </form>
             </div>
-        {% endif %}
+        </details>
 
-        <div class="chat-composer" aria-label="对话输入区域">
-            <details class="attachment-picker">
-                <summary aria-label="打开附件入口">+</summary>
-                <div class="attachment-menu">
-                    <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
-                        <label>
-                            上传图片
-                            <input type="file" name="attachment" accept=".png,.jpg,.jpeg" required>
-                            <span>支持PNG、JPG、JPEG；提取后可修改原文。</span>
-                        </label>
-                        <button class="button secondary small-button" type="submit">提取图片文字</button>
-                    </form>
-                    <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
-                        <label>
-                            上传Word
-                            <input type="file" name="attachment" accept=".docx" required>
-                            <span>仅支持DOCX，不支持旧版DOC。</span>
-                        </label>
-                        <button class="button secondary small-button" type="submit">提取Word文字</button>
-                    </form>
-                    <form class="attachment-upload-form" method="post" action="{{ url_for('main.import_task_file_route') }}" enctype="multipart/form-data">
-                        <label>
-                            上传PDF
-                            <input type="file" name="attachment" accept=".pdf" required>
-                            <span>仅提取文本型PDF，不对整份PDF做OCR。</span>
-                        </label>
-                        <button class="button secondary small-button" type="submit">提取PDF文字</button>
-                    </form>
-                </div>
-            </details>
-
-            <form class="text-parse-form" method="post" action="{{ url_for('main.parse_text_notice_route') }}">
-                <label class="sr-only" for="conversation-input">课程通知内容</label>
-                <textarea id="conversation-input" name="notice_text" rows="3" placeholder="粘贴老师通知文字。" aria-describedby="ai-entry-status" required>{{ notice_text or '' }}</textarea>
-                <button class="button" type="submit">解析文字</button>
-                <label class="sr-only" for="notice-date">通知日期</label>
-                <input id="notice-date" name="notice_date" type="date" value="{{ notice_date or '' }}" aria-label="通知日期">
+        <form class="chat-composer-form" data-chat-form method="post" action="{{ url_for('main.parse_text_notice_route') }}">
+            <label class="sr-only" for="conversation-input">消息内容</label>
+            <textarea id="conversation-input" data-chat-input name="notice_text" rows="3" maxlength="10000" placeholder="给课迹发送消息，或粘贴课程通知。" required>{{ notice_text or '' }}</textarea>
+            <div class="composer-tools">
+                <label class="date-field" for="notice-date">
+                    <span>通知日期</span>
+                    <input id="notice-date" data-notice-date name="notice_date" type="date" value="{{ notice_date or '' }}">
+                </label>
                 {% if imported_file %}
-                    <input type="hidden" name="source_type" value="{{ imported_file.source_type }}">
-                    <input type="hidden" name="source_filename" value="{{ imported_file.source_filename }}">
-                    <input type="hidden" name="source_pages" value="{{ imported_file.source_pages }}">
+                    <input data-source-type type="hidden" name="source_type" value="{{ imported_file.source_type }}">
+                    <input data-source-filename type="hidden" name="source_filename" value="{{ imported_file.source_filename }}">
+                    <input data-source-pages type="hidden" name="source_pages" value="{{ imported_file.source_pages }}">
+                {% else %}
+                    <input data-source-type type="hidden" name="source_type" value="">
+                    <input data-source-filename type="hidden" name="source_filename" value="">
+                    <input data-source-pages type="hidden" name="source_pages" value="">
                 {% endif %}
-            </form>
-        </div>
-        <p class="muted-text composer-note" id="ai-entry-status">如果通知里有“下周三”等相对时间，请填写通知日期；未配置API密钥时会启用本地演示解析模式。</p>
-    </article>
-
-    <details class="panel manual-entry-panel" {% if errors %}open{% endif %}>
-        <summary class="manual-entry-summary">
-            <span>
-                <strong>手动填写</strong>
-                <small>保留真实可用的备用入口，仍提交到现有任务保存流程。</small>
-            </span>
-            <span class="status-tag is-good">已接入</span>
-        </summary>
-        <form class="task-form" method="post" action="{{ url_for('main.create_task_route') }}">
-            {% include "_task_form.html" %}
-            <button class="button" type="submit">保存任务</button>
+                <button class="button" data-chat-submit type="submit">发送</button>
+            </div>
         </form>
-    </details>
+    </div>
+    <p class="muted-text composer-note">没有配置 API Key 时会使用本地演示模式；相对日期需要填写通知日期。</p>
 </section>
+
+<details class="panel manual-entry-panel" {% if errors %}open{% endif %}>
+    <summary class="manual-entry-summary">
+        <span>
+            <strong>不想使用对话？展开手动填写</strong>
+            <small>仍然提交到原有任务保存流程。</small>
+        </span>
+    </summary>
+    <form class="task-form" method="post" action="{{ url_for('main.create_task_route') }}">
+        {% include "_task_form.html" %}
+        <button class="button" type="submit">保存任务</button>
+    </form>
+</details>
 {% endblock %}

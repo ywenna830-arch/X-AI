@@ -1,8 +1,8 @@
 import os
 
-from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 
-from .ai_parser import AIParseError, parse_text_notice
+from .ai_parser import AIParseError, parse_chat_message, parse_text_notice
 from .file_importer import FileImportError, extract_uploaded_file
 from .planner import (
     INCOMPLETE_REASONS,
@@ -44,6 +44,7 @@ from .tasks import (
 
 
 main_bp = Blueprint("main", __name__)
+MAX_CHAT_MESSAGE_LENGTH = 10000
 
 
 @main_bp.get("/")
@@ -174,8 +175,76 @@ def parse_text_notice_route():
     )
 
 
+@main_bp.post("/api/chat")
+def chat_api():
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "请使用JSON请求。"}), 400
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "请求内容不是合法JSON。"}), 400
+
+    message = str(payload.get("message", "")).strip()
+    if not message:
+        return jsonify({"ok": False, "error": "消息不能为空。"}), 400
+    if len(message) > MAX_CHAT_MESSAGE_LENGTH:
+        return jsonify({"ok": False, "error": "单条消息不能超过10000个字符。"}), 400
+
+    notice_date = str(payload.get("notice_date", "")).strip()
+    source_type = str(payload.get("source_type", "")).strip()
+    source_filename = str(payload.get("source_filename", "")).strip()
+    source_pages = str(payload.get("source_pages", "")).strip()
+
+    try:
+        chat_result = parse_chat_message(message, notice_date)
+    except AIParseError as exc:
+        return jsonify({"ok": False, "error": exc.message}), 502
+
+    if chat_result["type"] == "chat":
+        return jsonify({"ok": True, "type": "chat", "reply": chat_result["reply"]})
+
+    result = chat_result["result"]
+    form_data = dict(result["data"])
+    form_data["source_text"] = message
+    if source_type:
+        form_data["source_type"] = source_type
+        form_data["source_filename"] = source_filename
+        form_data["source_pages"] = source_pages
+
+    session["pending_ai_task"] = {
+        "result": result,
+        "form_data": form_data,
+    }
+
+    return jsonify(
+        {
+            "ok": True,
+            "type": "task",
+            "reply": chat_result["reply"],
+            "task_preview": {
+                "course_name": form_data.get("course_name", ""),
+                "title": form_data.get("title", ""),
+                "deadline": form_data.get("deadline", ""),
+                "confidence": form_data.get("confidence", ""),
+            },
+            "confirm_url": url_for("main.ai_confirm"),
+        }
+    )
+
+
 @main_bp.get("/tasks/confirm")
 def ai_confirm():
+    pending_task = session.get("pending_ai_task")
+    if pending_task:
+        return render_template(
+            "ai_confirm.html",
+            active_page="ai_confirm",
+            result=pending_task.get("result"),
+            errors=[],
+            form_data=pending_task.get("form_data", {}),
+            statuses=ALLOWED_STATUSES,
+            priorities=ALLOWED_PRIORITIES,
+        )
     return render_template(
         "ai_confirm.html",
         active_page="ai_confirm",

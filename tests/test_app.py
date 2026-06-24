@@ -12,7 +12,13 @@ from app.tasks import get_db
 
 
 def make_app(tmp_path, extra_config=None):
-    config = {"TESTING": True, "DATABASE": str(tmp_path / "test.sqlite3")}
+    config = {
+        "TESTING": True,
+        "DATABASE": str(tmp_path / "test.sqlite3"),
+        "AI_API_KEY": "",
+        "AI_API_BASE_URL": "",
+        "AI_MODEL": "",
+    }
     if extra_config:
         config.update(extra_config)
     return create_app(config)
@@ -35,7 +41,7 @@ def test_stage_one_pages_load():
     app = create_app()
 
     pages = {
-        "/tasks/new": "添加任务",
+        "/tasks/new": "课迹助手",
         "/tasks/confirm": "AI识别确认",
         "/tasks": "任务中心",
         "/plan": "智能计划",
@@ -59,14 +65,167 @@ def test_add_task_page_shows_conversation_entry_points(tmp_path):
         response = client.get("/tasks/new")
 
     assert response.status_code == 200
-    assert "对话输入区域".encode("utf-8") in response.data
-    assert "把老师的文字通知粘贴给我".encode("utf-8") in response.data
-    assert "文字解析已接入".encode("utf-8") in response.data
+    assert "课迹助手".encode("utf-8") in response.data
+    assert "给课迹发送消息".encode("utf-8") in response.data
+    assert "不想使用对话？展开手动填写".encode("utf-8") in response.data
     assert "上传图片".encode("utf-8") in response.data
     assert "上传Word".encode("utf-8") in response.data
     assert "上传PDF".encode("utf-8") in response.data
     assert "提取图片文字".encode("utf-8") in response.data
     assert "仅支持DOCX".encode("utf-8") in response.data
+
+
+def test_chat_api_greeting_returns_chat_without_creating_task(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        response = client.post("/api/chat", json={"message": "你好"})
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+    assert response.get_json()["type"] == "chat"
+    assert response.get_json()["reply"]
+    assert _task_count(app) == 0
+
+
+def test_chat_api_thanks_and_capability_questions_are_chat(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        thanks = client.post("/api/chat", json={"message": "谢谢"})
+        capability = client.post("/api/chat", json={"message": "你能做什么"})
+
+    assert thanks.status_code == 200
+    assert thanks.get_json()["type"] == "chat"
+    assert capability.status_code == 200
+    assert capability.get_json()["type"] == "chat"
+    assert _task_count(app) == 0
+
+
+def test_chat_api_task_returns_preview_and_pending_confirm_without_save(tmp_path):
+    app = make_app(tmp_path, {"AI_DEMO_MODE": True})
+    message = "课程：软件工程；任务：完成测试报告；2026-07-01 18:00前提交"
+
+    with app.test_client() as client:
+        response = client.post("/api/chat", json={"message": message})
+        confirm = client.get("/tasks/confirm")
+
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data["ok"] is True
+    assert data["type"] == "task"
+    assert data["task_preview"]
+    assert data["confirm_url"] == "/tasks/confirm"
+    assert "完成测试报告".encode("utf-8") in confirm.data
+    assert "确认并保存".encode("utf-8") in confirm.data
+    assert _task_count(app) == 0
+
+
+def test_chat_api_short_task_text_returns_task_without_direct_save(tmp_path):
+    app = make_app(tmp_path, {"AI_DEMO_MODE": True})
+
+    with app.test_client() as client:
+        response = client.post("/api/chat", json={"message": "高数第三章作业周五前交"})
+
+    assert response.status_code == 200
+    assert response.get_json()["type"] == "task"
+    assert response.get_json()["task_preview"]
+    assert _task_count(app) == 0
+
+
+def test_chat_api_preserves_import_source_for_confirm(monkeypatch, tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "IMPORT_UPLOAD_DIR": str(tmp_path / "imports"),
+            "AI_DEMO_MODE": True,
+        },
+    )
+    monkeypatch.setattr(
+        "app.file_importer.extract_docx_text",
+        lambda path: "课程：软件工程\n任务：DOCX导入任务\n请在2099-06-20 20:00前提交。",
+    )
+
+    with app.test_client() as client:
+        import_response = client.post(
+            "/tasks/import",
+            data={"attachment": (io.BytesIO(_docx_bytes()), "notice.docx")},
+            content_type="multipart/form-data",
+        )
+        chat_response = client.post(
+            "/api/chat",
+            json={
+                "message": "课程：软件工程\n任务：DOCX导入任务\n请在2099-06-20 20:00前提交。",
+                "source_type": "Word",
+                "source_filename": "notice.docx",
+                "source_pages": "",
+            },
+        )
+        confirm = client.get("/tasks/confirm")
+
+    assert import_response.status_code == 200
+    assert chat_response.status_code == 200
+    assert "notice.docx".encode("utf-8") in confirm.data
+    assert "DOCX导入任务".encode("utf-8") in confirm.data
+
+
+def test_chat_api_rejects_empty_non_json_and_too_long_messages(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        empty = client.post("/api/chat", json={"message": "   "})
+        non_json = client.post("/api/chat", data="hello")
+        too_long = client.post("/api/chat", json={"message": "x" * 10001})
+
+    assert empty.status_code == 400
+    assert empty.get_json()["ok"] is False
+    assert non_json.status_code == 400
+    assert non_json.get_json()["ok"] is False
+    assert too_long.status_code == 400
+    assert too_long.get_json()["ok"] is False
+
+
+def test_chat_api_invalid_model_json_returns_structured_error(monkeypatch, tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "AI_API_KEY": "test-key",
+            "AI_API_BASE_URL": "https://api.example.test/v1/chat/completions",
+            "AI_MODEL": "deepseek-test",
+        },
+    )
+    monkeypatch.setattr("app.ai_parser._call_chat_model", lambda message, notice_date: "not-json")
+
+    with app.test_client() as client:
+        response = client.post("/api/chat", json={"message": "你好"})
+
+    assert response.status_code == 502
+    assert response.is_json
+    assert response.get_json()["ok"] is False
+    assert "合法JSON" in response.get_json()["error"]
+
+
+def test_chat_api_model_request_failure_returns_structured_error(monkeypatch, tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "AI_API_KEY": "test-key",
+            "AI_API_BASE_URL": "https://api.example.test/v1/chat/completions",
+            "AI_MODEL": "deepseek-test",
+        },
+    )
+
+    def fail_request(message, notice_date):
+        raise AIParseError("AI接口请求失败，请稍后重试。")
+
+    monkeypatch.setattr("app.ai_parser._call_chat_model", fail_request)
+
+    with app.test_client() as client:
+        response = client.post("/api/chat", json={"message": "你好"})
+
+    assert response.status_code == 502
+    assert response.is_json
+    assert response.get_json() == {"ok": False, "error": "AI接口请求失败，请稍后重试。"}
 
 
 def test_manual_entry_form_still_creates_task(tmp_path):
@@ -1201,6 +1360,11 @@ def _task_id_by_title(app, title):
         row = get_db().execute("SELECT id FROM tasks WHERE title = ?", (title,)).fetchone()
     assert row is not None
     return row["id"]
+
+
+def _task_count(app):
+    with app.app_context():
+        return get_db().execute("SELECT COUNT(*) AS count FROM tasks").fetchone()["count"]
 
 
 def _unfold_ics(text):
