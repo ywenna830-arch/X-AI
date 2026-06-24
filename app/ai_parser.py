@@ -80,7 +80,7 @@ def parse_text_notice(notice_text, notice_date=""):
     }
 
 
-def parse_chat_message(message, notice_date=""):
+def parse_chat_message(message, notice_date="", history=None):
     message = (message or "").strip()
     notice_date = (notice_date or "").strip()
     if not message:
@@ -89,7 +89,7 @@ def parse_chat_message(message, notice_date=""):
     if current_app.config.get("AI_DEMO_MODE") or not current_app.config.get("AI_API_KEY"):
         return _demo_chat(message, notice_date)
 
-    content = _call_chat_model(message, notice_date)
+    content = _call_chat_model(message, notice_date, history or [])
     return parse_chat_model_json(content)
 
 
@@ -246,28 +246,30 @@ def _call_model(notice_text, notice_date):
         raise AIParseError("AI接口响应缺少模型输出内容。") from exc
 
 
-def _call_chat_model(message, notice_date):
+def _call_chat_model(message, notice_date, history=None):
     api_base_url = current_app.config.get("AI_API_BASE_URL")
     model = current_app.config.get("AI_MODEL")
     if not api_base_url or not model:
         raise AIParseError("AI接口地址或模型未配置，请检查 .env。")
 
+    messages = [
+        {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+        *(history or []),
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "notice_date": notice_date,
+                    "message": message,
+                    "required_task_fields": AI_FIELDS,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": CHAT_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "notice_date": notice_date,
-                        "message": message,
-                        "required_task_fields": AI_FIELDS,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ],
+        "messages": messages,
         "temperature": 0,
         "response_format": {"type": "json_object"},
     }

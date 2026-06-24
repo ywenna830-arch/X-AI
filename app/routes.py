@@ -45,6 +45,38 @@ from .tasks import (
 
 main_bp = Blueprint("main", __name__)
 MAX_CHAT_MESSAGE_LENGTH = 10000
+MAX_CHAT_HISTORY_MESSAGES = 8
+
+
+def _get_chat_history():
+    raw_history = session.get("chat_history", [])
+    if not isinstance(raw_history, list):
+        session["chat_history"] = []
+        return []
+
+    history = []
+    for item in raw_history:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            history.append({"role": role, "content": content.strip()})
+
+    history = history[-MAX_CHAT_HISTORY_MESSAGES:]
+    session["chat_history"] = history
+    return history
+
+
+def _append_chat_history(user_message, assistant_reply):
+    history = _get_chat_history()
+    history.extend(
+        [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": assistant_reply},
+        ]
+    )
+    session["chat_history"] = history[-MAX_CHAT_HISTORY_MESSAGES:]
 
 
 @main_bp.get("/")
@@ -124,6 +156,7 @@ def create_task_route():
         )
 
     task_id = create_task(data)
+    session.pop("pending_ai_task", None)
     flash("任务已新增。")
     return redirect(url_for("main.task_detail", task_id=task_id))
 
@@ -195,10 +228,13 @@ def chat_api():
     source_filename = str(payload.get("source_filename", "")).strip()
     source_pages = str(payload.get("source_pages", "")).strip()
 
+    history = _get_chat_history()
     try:
-        chat_result = parse_chat_message(message, notice_date)
+        chat_result = parse_chat_message(message, notice_date, history)
     except AIParseError as exc:
         return jsonify({"ok": False, "error": exc.message}), 502
+
+    _append_chat_history(message, chat_result["reply"])
 
     if chat_result["type"] == "chat":
         return jsonify({"ok": True, "type": "chat", "reply": chat_result["reply"]})
@@ -230,6 +266,13 @@ def chat_api():
             "confirm_url": url_for("main.ai_confirm"),
         }
     )
+
+
+@main_bp.post("/api/chat/reset")
+def reset_chat_api():
+    session.pop("chat_history", None)
+    session.pop("pending_ai_task", None)
+    return jsonify({"ok": True})
 
 
 @main_bp.get("/tasks/confirm")

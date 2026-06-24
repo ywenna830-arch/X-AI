@@ -52,6 +52,7 @@ if (chatForm) {
     const chatThread = document.querySelector("[data-chat-thread]");
     const chatInput = document.querySelector("[data-chat-input]");
     const submitButton = document.querySelector("[data-chat-submit]");
+    const resetButton = document.querySelector("[data-chat-reset]");
     const noticeDate = document.querySelector("[data-notice-date]");
     const sourceType = document.querySelector("[data-source-type]");
     const sourceFilename = document.querySelector("[data-source-filename]");
@@ -77,6 +78,43 @@ if (chatForm) {
     const appendUserMessage = (text) => appendMessage(text, "user");
     const appendAssistantMessage = (text) => appendMessage(text, "assistant");
     const appendErrorMessage = (text) => appendMessage(text, "error");
+
+    const restoreWelcomeMessage = () => {
+        chatThread.innerHTML = "";
+        const message = document.createElement("div");
+        message.className = "chat-message assistant-message";
+
+        const content = document.createElement("div");
+        content.className = "message-content";
+
+        const firstLine = document.createElement("p");
+        firstLine.textContent = "你好，我可以帮你整理课程通知、作业和考试安排。";
+
+        const secondLine = document.createElement("p");
+        secondLine.textContent = "直接发送文字，也可以先上传图片、DOCX 或 PDF 提取文字。";
+
+        content.appendChild(firstLine);
+        content.appendChild(secondLine);
+        message.appendChild(content);
+        chatThread.appendChild(message);
+    };
+
+    const clearAttachmentContext = () => {
+        if (sourceType) {
+            sourceType.value = "";
+        }
+        if (sourceFilename) {
+            sourceFilename.value = "";
+        }
+        if (sourcePages) {
+            sourcePages.value = "";
+        }
+
+        const preview = document.querySelector("[data-import-preview]");
+        if (preview) {
+            preview.remove();
+        }
+    };
 
     const appendLoadingMessage = () => {
         const message = appendMessage("正在回复...", "assistant");
@@ -170,6 +208,7 @@ if (chatForm) {
             appendAssistantMessage(data.reply || "我已处理。");
             if (data.type === "task") {
                 appendTaskPreview(data.task_preview || {}, data.confirm_url);
+                clearAttachmentContext();
             }
             chatInput.value = "";
         } catch (error) {
@@ -184,6 +223,24 @@ if (chatForm) {
         event.preventDefault();
         sendChatMessage();
     });
+
+    if (resetButton) {
+        resetButton.addEventListener("click", async () => {
+            try {
+                const response = await fetch("/api/chat/reset", {method: "POST"});
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    appendErrorMessage(data.error || "新对话失败，请稍后重试。");
+                    return;
+                }
+                removeLoadingMessage();
+                restoreWelcomeMessage();
+                chatInput.value = "";
+            } catch (error) {
+                appendErrorMessage("新对话失败，请稍后重试。");
+            }
+        });
+    }
 
     chatInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter" && !event.shiftKey) {

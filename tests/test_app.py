@@ -1,11 +1,13 @@
 import io
+import json
 import sys
 import types
 import zipfile
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from app import create_app
-from app.ai_parser import AIParseError, parse_model_json, parse_text_notice
+from app.ai_parser import AIParseError, _call_chat_model, parse_model_json, parse_text_notice
 from app.planner import generate_plan
 from app.reminders import countdown_label, dashboard_data as reminder_dashboard_data
 from app.tasks import get_db
@@ -102,6 +104,134 @@ def test_chat_api_thanks_and_capability_questions_are_chat(tmp_path):
     assert _task_count(app) == 0
 
 
+def test_chat_api_passes_previous_turn_history_to_model(monkeypatch, tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "AI_API_KEY": "test-key",
+            "AI_API_BASE_URL": "https://api.example.test/v1/chat/completions",
+            "AI_MODEL": "deepseek-test",
+        },
+    )
+    calls = []
+
+    def fake_call(message, notice_date, history):
+        calls.append({"message": message, "history": history})
+        if message == "老师说明天交作业":
+            return json.dumps({"type": "chat", "reply": "还缺课程名称，我先记住这条线索。"}, ensure_ascii=False)
+        return json.dumps({"type": "chat", "reply": "上一轮说的是明天交作业，现在补充了高等数学。"}, ensure_ascii=False)
+
+    monkeypatch.setattr("app.ai_parser._call_chat_model", fake_call)
+
+    with app.test_client() as client:
+        first = client.post("/api/chat", json={"message": "老师说明天交作业"})
+        second = client.post("/api/chat", json={"message": "高等数学"})
+        with client.session_transaction() as session_data:
+            history = session_data["chat_history"]
+
+    assert first.status_code == 200
+    assert first.get_json()["type"] == "chat"
+    assert second.status_code == 200
+    assert calls[0]["history"] == []
+    assert calls[1]["history"] == [
+        {"role": "user", "content": "老师说明天交作业"},
+        {"role": "assistant", "content": "还缺课程名称，我先记住这条线索。"},
+    ]
+    assert history[-2:] == [
+        {"role": "user", "content": "高等数学"},
+        {"role": "assistant", "content": "上一轮说的是明天交作业，现在补充了高等数学。"},
+    ]
+
+
+def test_call_chat_model_includes_system_history_and_current_json(monkeypatch, tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "AI_API_KEY": "test-key",
+            "AI_API_BASE_URL": "https://api.example.test/v1/chat/completions",
+            "AI_MODEL": "deepseek-test",
+        },
+    )
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            content = json.dumps({"type": "chat", "reply": "收到。"}, ensure_ascii=False)
+            return json.dumps({"choices": [{"message": {"content": content}}]}).encode("utf-8")
+
+    def fake_urlopen(req, timeout):
+        captured["payload"] = json.loads(req.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr("app.ai_parser.request.urlopen", fake_urlopen)
+
+    history = [
+        {"role": "user", "content": "老师说明天交作业"},
+        {"role": "assistant", "content": "还缺课程名称。"},
+    ]
+    with app.app_context():
+        _call_chat_model("高等数学", "", history)
+
+    messages = captured["payload"]["messages"]
+    assert messages[0]["role"] == "system"
+    assert messages[1:3] == history
+    assert messages[-1]["role"] == "user"
+    current_message = json.loads(messages[-1]["content"])
+    assert current_message["message"] == "高等数学"
+    assert "required_task_fields" in current_message
+
+
+def test_chat_history_trims_to_recent_eight_messages(monkeypatch, tmp_path):
+    app = make_app(
+        tmp_path,
+        {
+            "AI_API_KEY": "test-key",
+            "AI_API_BASE_URL": "https://api.example.test/v1/chat/completions",
+            "AI_MODEL": "deepseek-test",
+        },
+    )
+
+    def fake_call(message, notice_date, history):
+        return json.dumps({"type": "chat", "reply": f"回复：{message}"}, ensure_ascii=False)
+
+    monkeypatch.setattr("app.ai_parser._call_chat_model", fake_call)
+
+    with app.test_client() as client:
+        for index in range(6):
+            response = client.post("/api/chat", json={"message": f"第{index}轮"})
+            assert response.status_code == 200
+        with client.session_transaction() as session_data:
+            history = session_data["chat_history"]
+
+    assert len(history) == 8
+    assert history[0] == {"role": "user", "content": "第2轮"}
+    assert history[-1] == {"role": "assistant", "content": "回复：第5轮"}
+
+
+def test_chat_reset_clears_history_and_pending_task(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        with client.session_transaction() as session_data:
+            session_data["chat_history"] = [{"role": "user", "content": "旧消息"}]
+            session_data["pending_ai_task"] = {"form_data": {"title": "旧草稿"}}
+
+        response = client.post("/api/chat/reset")
+
+        with client.session_transaction() as session_data:
+            assert "chat_history" not in session_data
+            assert "pending_ai_task" not in session_data
+
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True}
+
+
 def test_chat_api_task_returns_preview_and_pending_confirm_without_save(tmp_path):
     app = make_app(tmp_path, {"AI_DEMO_MODE": True})
     message = "课程：软件工程；任务：完成测试报告；2026-07-01 18:00前提交"
@@ -194,7 +324,7 @@ def test_chat_api_invalid_model_json_returns_structured_error(monkeypatch, tmp_p
             "AI_MODEL": "deepseek-test",
         },
     )
-    monkeypatch.setattr("app.ai_parser._call_chat_model", lambda message, notice_date: "not-json")
+    monkeypatch.setattr("app.ai_parser._call_chat_model", lambda message, notice_date, history: "not-json")
 
     with app.test_client() as client:
         response = client.post("/api/chat", json={"message": "你好"})
@@ -215,7 +345,7 @@ def test_chat_api_model_request_failure_returns_structured_error(monkeypatch, tm
         },
     )
 
-    def fail_request(message, notice_date):
+    def fail_request(message, notice_date, history):
         raise AIParseError("AI接口请求失败，请稍后重试。")
 
     monkeypatch.setattr("app.ai_parser._call_chat_model", fail_request)
@@ -256,6 +386,62 @@ def test_manual_entry_form_still_creates_task(tmp_path):
     assert create_response.status_code == 200
     assert "需求分析作业".encode("utf-8") in create_response.data
     assert "软件工程".encode("utf-8") in create_response.data
+
+
+def test_task_create_success_clears_pending_ai_task_and_confirm_is_empty(tmp_path):
+    app = make_app(tmp_path)
+
+    with app.test_client() as client:
+        with client.session_transaction() as session_data:
+            session_data["pending_ai_task"] = {"form_data": {"title": "旧草稿"}}
+
+        create_response = client.post(
+            "/tasks",
+            data={
+                "course_name": "软件工程",
+                "title": "保存后清草稿",
+                "task_type": "作业",
+                "description": "验证保存成功后清理session草稿",
+                "deadline": "2099-06-20T20:00",
+                "estimated_minutes": "60",
+                "priority": "中",
+                "status": "未开始",
+            },
+        )
+        confirm_response = client.get("/tasks/confirm")
+
+        with client.session_transaction() as session_data:
+            assert "pending_ai_task" not in session_data
+
+    assert create_response.status_code == 302
+    assert confirm_response.status_code == 200
+    assert "暂无草稿".encode("utf-8") in confirm_response.data
+
+
+def test_task_create_validation_failure_keeps_pending_ai_task(tmp_path):
+    app = make_app(tmp_path)
+    pending_task = {"form_data": {"title": "保留草稿"}}
+
+    with app.test_client() as client:
+        with client.session_transaction() as session_data:
+            session_data["pending_ai_task"] = pending_task
+
+        response = client.post(
+            "/tasks",
+            data={
+                "title": "",
+                "deadline": "not-a-date",
+                "estimated_minutes": "-1",
+                "priority": "最高",
+                "status": "已逾期",
+            },
+        )
+
+        with client.session_transaction() as session_data:
+            assert session_data["pending_ai_task"] == pending_task
+
+    assert response.status_code == 400
+    assert "任务名称不能为空".encode("utf-8") in response.data
 
 
 def test_ai_text_parse_complete_notice_requires_confirmation_before_save(tmp_path):
@@ -672,6 +858,34 @@ def test_imported_text_can_be_edited_and_sent_to_existing_ai_confirm(monkeypatch
     assert "结构化任务卡片".encode("utf-8") in parse_response.data
     assert "修改后的图片任务".encode("utf-8") in parse_response.data
     assert "notice.png".encode("utf-8") in parse_response.data
+
+
+def test_frontend_task_success_clears_attachment_context_but_chat_does_not():
+    script = Path("app/static/js/main.js").read_text(encoding="utf-8")
+
+    task_branch_start = script.index('if (data.type === "task") {')
+    task_branch_end = script.index('            chatInput.value = "";', task_branch_start)
+    task_branch = script[task_branch_start:task_branch_end]
+
+    assert "const clearAttachmentContext = () => {" in script
+    assert 'sourceType.value = "";' in script
+    assert 'sourceFilename.value = "";' in script
+    assert 'sourcePages.value = "";' in script
+    assert 'document.querySelector("[data-import-preview]")' in script
+    assert "preview.remove();" in script
+    assert "clearAttachmentContext();" in task_branch
+    assert script.count("clearAttachmentContext();") == 1
+
+
+def test_frontend_reset_button_clears_thread_and_restores_welcome():
+    template = Path("app/templates/add_task.html").read_text(encoding="utf-8")
+    script = Path("app/static/js/main.js").read_text(encoding="utf-8")
+
+    assert "data-chat-reset" in template
+    assert 'fetch("/api/chat/reset", {method: "POST"})' in script
+    assert "const restoreWelcomeMessage = () => {" in script
+    assert 'chatThread.innerHTML = "";' in script
+    assert "你好，我可以帮你整理课程通知、作业和考试安排。" in script
 
 
 def test_replan_after_unfinished_feedback_replaces_only_active_items(tmp_path):
