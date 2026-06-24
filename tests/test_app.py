@@ -77,6 +77,54 @@ def test_add_task_page_shows_conversation_entry_points(tmp_path):
     assert "仅支持DOCX".encode("utf-8") in response.data
 
 
+def test_app_reads_render_environment_and_creates_database_parent(monkeypatch, tmp_path):
+    db_path = tmp_path / "render-data" / "tasks.sqlite3"
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("AI_API_KEY", "test-ai-key")
+    monkeypatch.setenv("AI_API_BASE_URL", "https://api.example.test/v1/chat/completions")
+    monkeypatch.setenv("AI_MODEL", "deepseek-test")
+    monkeypatch.setenv("AI_TIMEOUT", "12")
+    monkeypatch.setenv("AI_DEMO_MODE", "1")
+    monkeypatch.setenv("APP_TIMEZONE", "UTC")
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    app = create_app({"TESTING": True})
+
+    assert app.config["SECRET_KEY"] == "test-secret"
+    assert app.config["AI_API_KEY"] == "test-ai-key"
+    assert app.config["AI_API_BASE_URL"] == "https://api.example.test/v1/chat/completions"
+    assert app.config["AI_MODEL"] == "deepseek-test"
+    assert app.config["AI_TIMEOUT"] == 12
+    assert app.config["AI_DEMO_MODE"] is True
+    assert app.config["APP_TIMEZONE"] == "UTC"
+    assert app.config["DATABASE"] == str(db_path)
+    assert db_path.parent.exists()
+    assert db_path.exists()
+
+
+def test_render_and_docker_configuration_are_safe_for_deployment():
+    requirements = Path("requirements.txt").read_text(encoding="utf-8")
+    render_config = Path("render.yaml").read_text(encoding="utf-8")
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
+    gitignore = Path(".gitignore").read_text(encoding="utf-8")
+
+    assert "gunicorn" in requirements
+    assert "runtime: docker" in render_config
+    assert "dockerfilePath: ./Dockerfile" in render_config
+    assert 'sh -c "gunicorn run:app --bind 0.0.0.0:$PORT"' in render_config
+    assert "DATABASE_PATH" in render_config
+    assert "/var/data/tasks.sqlite3" in render_config
+    assert "AI_API_KEY" not in render_config
+    assert "SECRET_KEY" not in render_config
+    assert "tesseract-ocr" in dockerfile
+    assert "tesseract-ocr-chi-sim" in dockerfile
+    assert "gunicorn run:app --bind 0.0.0.0:${PORT}" in dockerfile
+    assert ".env" in dockerignore
+    assert "instance/" in dockerignore
+    assert ".env" in gitignore
+
+
 def test_chat_api_greeting_returns_chat_without_creating_task(tmp_path):
     app = make_app(tmp_path)
 

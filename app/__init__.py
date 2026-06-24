@@ -30,6 +30,7 @@ def create_app(test_config=None):
         app.config.update(test_config)
 
     os.makedirs(app.instance_path, exist_ok=True)
+    os.makedirs(os.path.dirname(app.config["DATABASE"]) or ".", exist_ok=True)
 
     from .planner import init_plan_db
     from .reminders import init_reminder_db

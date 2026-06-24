@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: x-ai-keji
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: sh -c "gunicorn run:app --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: AI_DEMO_MODE
+        value: "0"
+      - key: APP_TIMEZONE
+        value: Asia/Shanghai
+      - key: DATABASE_PATH
+        value: /var/data/tasks.sqlite3
+    disk:
+      name: x-ai-keji-data
+      mountPath: /var/data
+      sizeGB: 1
