@@ -1,5 +1,4 @@
 Flask==3.0.3
-gunicorn
 python-dotenv==1.0.1
 pytest==8.2.2
 Pillow==10.4.0

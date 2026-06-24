@@ -42,8 +42,6 @@ app/
 tests/test_app.py      自动化测试
 run.py                 本地启动入口
 requirements.txt       Python依赖
-render.yaml            Render Docker部署配置
-Dockerfile             容器部署和OCR系统依赖
 ```
 
 ## 安装步骤
@@ -93,28 +91,7 @@ APP_TIMEZONE=Asia/Shanghai
 
 API密钥只从环境变量读取，不能写入源代码。配置 `AI_API_KEY` 后，课迹助手会统一调用 DeepSeek 或兼容 OpenAI Chat Completions 格式的接口，并要求返回 `chat` 或 `task` JSON。未配置 `AI_API_KEY` 时，会启用页面明确标注的本地演示模式。
 
-`DATABASE_PATH` 未配置时默认使用本地 `instance/tasks.sqlite3`；部署到 Render 时建议设置为 `/var/data/tasks.sqlite3`，并挂载持久化磁盘，避免 SQLite 数据随容器重建丢失。
-
-## Render 部署
-
-本项目已提供 Docker 优先的 Render 部署配置。Docker 镜像会安装 Python 运行环境、`requirements.txt` 依赖、`tesseract-ocr` 和中文 OCR 语言包 `tesseract-ocr-chi-sim`，因此图片 OCR 在生产环境不只依赖 Python 包，也具备系统级 Tesseract 程序。
-
-1. 在 Render 新建 Web Service，连接 GitHub 仓库 `ywenna830-arch/X-AI`。
-2. 环境选择 Docker，Render 会使用仓库中的 `Dockerfile`；Blueprint 可使用 `render.yaml`。
-3. 启动命令为 `gunicorn run:app --bind 0.0.0.0:$PORT`。如使用非 Docker Python 环境，`gunicorn run:app` 也可直接加载现有 `run.py` 中的 `app`。
-4. 在 Render 环境变量中添加：
-   - `SECRET_KEY`：生产随机密钥，不要写入仓库。
-   - `AI_API_KEY`：DeepSeek 或兼容接口密钥。
-   - `AI_API_BASE_URL`：AI接口地址。
-   - `AI_MODEL`：模型名称。
-   - `AI_TIMEOUT`：请求超时时间，例如 `20`。
-   - `AI_DEMO_MODE`：生产建议 `0`。
-   - `APP_TIMEZONE`：默认 `Asia/Shanghai`。
-   - `DATABASE_PATH`：建议 `/var/data/tasks.sqlite3`。
-5. 为 SQLite 挂载 Render persistent disk 到 `/var/data`。仓库中的 `render.yaml` 已声明 1GB 磁盘和 `DATABASE_PATH=/var/data/tasks.sqlite3`。
-6. 部署完成后，访问 Render 提供的服务链接，并检查 `/health` 返回正常。
-
-不要把真实 `SECRET_KEY`、`AI_API_KEY` 或 `.env` 提交到 GitHub；`.gitignore` 和 `.dockerignore` 已排除本地配置、数据库、上传临时文件和日志。
+`DATABASE_PATH` 未配置时默认使用本地 `instance/tasks.sqlite3`；如需自定义SQLite文件位置，可设置该变量，应用会自动创建数据库父目录。
 
 ## 使用流程
 
